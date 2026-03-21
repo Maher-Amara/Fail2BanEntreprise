@@ -122,10 +122,21 @@ ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.53/26
 ## Step 8 — Install Systemd Service
 
 ```bash
-cp f2b-agent.service /etc/systemd/system/f2b-agent.service
-systemctl daemon-reload
-systemctl enable f2b-agent
-systemctl start f2b-agent
+sudo cp f2b-agent.service /etc/systemd/system/f2b-agent.service
+sudo systemctl daemon-reload
+sudo systemctl enable f2b-agent
+sudo systemctl restart f2b-agent
+sudo systemctl status f2b-agent --no-pager
+```
+
+If you see `status=226/NAMESPACE`, your host does not support namespace-based
+systemd sandboxing for this unit. Use the `f2b-agent.service` from this repo
+(without `ProtectSystem`/`ReadWritePaths`), then reload and restart:
+
+```bash
+sudo cp f2b-agent.service /etc/systemd/system/f2b-agent.service
+sudo systemctl daemon-reload
+sudo systemctl restart f2b-agent
 ```
 
 ---
@@ -166,7 +177,7 @@ iptables -L INPUT -n | grep f2b
 ## Maintenance
 
 | Task | Command |
-|---|---|
+| --- | --- |
 | Check a specific jail | `fail2ban-client status <jail>` |
 | Reload Fail2Ban config | `fail2ban-client reload` |
 | View blocked IPs | `iptables -L -n \| grep f2b` |
@@ -181,7 +192,7 @@ iptables -L INPUT -n | grep f2b
 ## Auth Model
 
 | Endpoint | Auth | Called by |
-|---|---|---|
+| --- | --- | --- |
 | `POST /api/ban` | `x-api-key` (per-server token) | Agent on Fail2Ban ban event |
 | `GET /api/sync` | `x-api-key` (per-server token) | Agent sync-loop (every 60s) |
 | `POST /api/unban` | JWT cookie | Dashboard admin only |

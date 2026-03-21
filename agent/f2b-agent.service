@@ -13,8 +13,6 @@ EnvironmentFile=/etc/f2b-agent.conf
 
 # Harden the service
 NoNewPrivileges=yes
-ProtectSystem=strict
-ReadWritePaths=/var/log
 
 [Install]
 WantedBy=multi-user.target
