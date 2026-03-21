@@ -21,7 +21,17 @@
 
 ---
 
-## Step 1 — Install Fail2Ban and ipset
+## Step 1 — Clone the Repository in Home Directory
+
+```bash
+cd ~
+git clone https://github.com/Maher-Amara/Fail2BanEntreprise.git
+cd ~/Fail2BanEntreprise/agent
+```
+
+---
+
+## Step 2 — Install Fail2Ban and ipset
 
 **ViciDial / ViciBox (openSUSE / SLES):**
 
@@ -37,7 +47,7 @@ apt-get update && apt-get install -y fail2ban ipset
 
 ---
 
-## Step 2 — Register This Server in the Dashboard
+## Step 3 — Register This Server in the Dashboard
 
 1. Log in at **<https://f2b.scopcall.com>**
 2. Go to **Servers → Register New Server**
@@ -46,7 +56,7 @@ apt-get update && apt-get install -y fail2ban ipset
 
 ---
 
-## Step 3 — Install the Agent
+## Step 4 — Install the Agent
 
 ```bash
 # Copy agent binary
@@ -59,7 +69,7 @@ f2b-agent help
 
 ---
 
-## Step 4 — Configure the Agent
+## Step 5 — Configure the Agent
 
 ```bash
 cp f2b-agent.conf /etc/f2b-agent.conf
@@ -77,7 +87,7 @@ F2B_IPSET_NAME="f2b-global"
 
 ---
 
-## Step 5 — Install Fail2Ban Action
+## Step 6 — Install Fail2Ban Action
 
 ```bash
 cp f2be.conf /etc/fail2ban/action.d/f2be.conf
@@ -85,7 +95,7 @@ cp f2be.conf /etc/fail2ban/action.d/f2be.conf
 
 ---
 
-## Step 6 — Install jail.local
+## Step 7 — Install jail.local
 
 Choose the file that matches your platform:
 
@@ -109,7 +119,7 @@ ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.53/26
 
 ---
 
-## Step 7 — Install Systemd Service
+## Step 8 — Install Systemd Service
 
 ```bash
 cp f2b-agent.service /etc/systemd/system/f2b-agent.service
@@ -120,7 +130,7 @@ systemctl start f2b-agent
 
 ---
 
-## Step 8 — Enable and Reload Fail2Ban
+## Step 9 — Enable and Reload Fail2Ban
 
 ```bash
 systemctl enable fail2ban
