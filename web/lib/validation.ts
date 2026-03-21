@@ -17,7 +17,8 @@ const cidr = z.string().regex(
 export const banSchema = z.object({
   ip: ipv4,
   jail: z.string().min(1).max(64).regex(/^[a-zA-Z0-9_-]+$/),
-  server: z.string().min(1).max(128).regex(/^[a-zA-Z0-9._-]+$/),
+  // Optional for agents: server name is derived from API token on the backend.
+  server: z.string().min(1).max(128).regex(/^[a-zA-Z0-9._-]+$/).optional(),
   bantime: z.number().int().min(1).max(31536000).optional(),
 });
 
