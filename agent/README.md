@@ -129,29 +129,19 @@ sudo systemctl restart f2b-agent
 sudo systemctl status f2b-agent --no-pager
 ```
 
-If you see `status=226/NAMESPACE`, your host does not support namespace-based
-systemd sandboxing for this unit. Use the `f2b-agent.service` from this repo
-(without `ProtectSystem`/`ReadWritePaths`), then reload and restart:
-
-```bash
-sudo cp f2b-agent.service /etc/systemd/system/f2b-agent.service
-sudo systemctl daemon-reload
-sudo systemctl restart f2b-agent
-```
-
 ---
 
 ## Step 9 — Enable and Reload Fail2Ban
 
 ```bash
-systemctl enable fail2ban
-systemctl restart fail2ban
+sudo systemctl enable fail2ban
+sudo systemctl restart fail2ban
 
 # Verify jails are active
-fail2ban-client status
+sudo fail2ban-client status
 
 # Verify agent is syncing
-journalctl -u f2b-agent -f
+sudo journalctl -u f2b-agent -f
 ```
 
 ---
@@ -160,16 +150,16 @@ journalctl -u f2b-agent -f
 
 ```bash
 # Active jails
-fail2ban-client status
+sudo fail2ban-client status
 
 # Agent sync log
-tail -f /var/log/f2b-agent.log
+sudo tail -f /var/log/f2b-agent.log
 
 # Global ipset contents
-ipset list f2b-global | head -20
+sudo ipset list f2b-global | head -20
 
 # iptables DROP rule for ipset
-iptables -L INPUT -n | grep f2b
+sudo iptables -L INPUT -n | grep f2b
 ```
 
 ---

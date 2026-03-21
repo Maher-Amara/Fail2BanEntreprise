@@ -26,7 +26,6 @@ import ipaddress
 import json
 import logging
 import os
-import re
 import subprocess
 import sys
 import time
@@ -86,8 +85,6 @@ def _parse_conf(path: str) -> dict[str, str]:
     if not os.path.isfile(path):
         return result
 
-    _unquote = re.compile(r'^["\']?(.*?)["\']?\s*$')
-
     with open(path, encoding="utf-8") as fh:
         for raw in fh:
             line = raw.strip()
@@ -111,7 +108,7 @@ def load_config() -> dict[str, str]:
     for k in DEFAULTS:
         env_val = os.environ.get(k)
         if env_val is not None:
-            cfg[k] = env_val
+            cfg[k] = env_val.strip().strip('"').strip("'")
     # Strip trailing slash from URL
     cfg["F2B_API_URL"] = cfg["F2B_API_URL"].rstrip("/")
     return cfg
@@ -129,12 +126,15 @@ def _api_post(url: str, key: str, body: dict, timeout: int = 10) -> Optional[int
         headers={
             "Content-Type": "application/json",
             "x-api-key":    key,
+            "User-Agent":   "Fail2BanEntreprise-Agent/1.0",
+            "Accept":       "application/json",
         },
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status
     except urllib.error.HTTPError as exc:
+        log.debug("HTTP POST error: %s", exc)
         return exc.code
     except Exception as exc:
         log.debug("HTTP POST error: %s", exc)
@@ -143,10 +143,20 @@ def _api_post(url: str, key: str, body: dict, timeout: int = 10) -> Optional[int
 
 def _api_get(url: str, key: str, timeout: int = 15) -> Optional[dict]:
     """GET JSON from the API, return parsed dict or None on error."""
-    req = urllib.request.Request(url, headers={"x-api-key": key})
+    req = urllib.request.Request(
+        url,
+        headers={
+            "x-api-key":  key,
+            "User-Agent": "Fail2BanEntreprise-Agent/1.0",
+            "Accept":     "application/json",
+        },
+    )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        log.warning("HTTP GET failed for %s (status=%s)", url, exc.code)
+        return None
     except Exception as exc:
         log.debug("HTTP GET error: %s", exc)
         return None
@@ -237,7 +247,7 @@ def action_sync(cfg: dict) -> None:
     # Fetch global state
     data = _api_get(f"{cfg['F2B_API_URL']}/api/sync", cfg["F2B_API_KEY"])
     if data is None:
-        log.warning("SYNC failed — API unreachable")
+        log.warning("SYNC failed — API request rejected or unreachable")
         return
 
     bans:      list[dict] = data.get("bans",      [])

@@ -9,7 +9,6 @@ Type=simple
 ExecStart=/usr/local/bin/f2b-agent sync-loop
 Restart=on-failure
 RestartSec=15
-EnvironmentFile=/etc/f2b-agent.conf
 
 # Harden the service
 NoNewPrivileges=yes
