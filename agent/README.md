@@ -104,10 +104,10 @@ Choose the file that matches your platform:
 cp vicidial.conf /etc/fail2ban/jail.local
 
 # FusionPBX
-cp fusionpbx.conf /etc/fail2ban/jail.local
+sudo cp fusionpbx.conf /etc/fail2ban/jail.local
 
 # Generic Debian
-cp debian.conf /etc/fail2ban/jail.local
+sudo cp debian.conf /etc/fail2ban/jail.local
 ```
 
 > **⚠️ Before reloading:** Edit `jail.local` and verify the `ignoreip` line includes your office IP and VPN exit IP. Getting blocked by any jail locks out SSH + web + SIP simultaneously.
