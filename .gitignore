@@ -1,0 +1,15 @@
+# Dependencies
+web/node_modules/
+
+# Next.js build
+web/.next/
+web/out/
+
+# Environment
+.env
+
+# GeoIP database (downloaded at setup)
+web/data/*.mmdb
+
+# Logs
+*.log

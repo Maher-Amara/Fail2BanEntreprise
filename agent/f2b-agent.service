@@ -1,0 +1,20 @@
+[Unit]
+Description=Fail2BanEntreprise Agent — Global ban sync
+Documentation=https://f2b.scopcall.com/servers
+After=network-online.target fail2ban.service
+Wants=network-online.target fail2ban.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/f2b-agent sync-loop
+Restart=on-failure
+RestartSec=15
+EnvironmentFile=/etc/f2b-agent.conf
+
+# Harden the service
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/log
+
+[Install]
+WantedBy=multi-user.target
