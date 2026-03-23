@@ -65,7 +65,7 @@ def _setup_logging() -> logging.Logger:
         fh.setFormatter(logging.Formatter(fmt, datefmt))
         logger.addHandler(fh)
     except PermissionError:
-        logger.warning("Cannot write to %s — logging to stdout only", LOG_FILE)
+        logger.warning("Cannot write to %s - logging to stdout only", LOG_FILE)
 
     return logger
 
@@ -220,7 +220,7 @@ def action_ban(cfg: Dict[str, str], ip: str, jail: str, bantime: int = 86400) ->
     if code == 200:
         log.info("BAN ok ip=%s", ip)
     elif code is None:
-        log.warning("BAN failed ip=%s — API unreachable", ip)
+        log.warning("BAN failed ip=%s - API unreachable", ip)
     else:
         log.warning("BAN failed ip=%s http=%s", ip, code)
 
@@ -252,7 +252,7 @@ def action_sync(cfg: Dict[str, str]) -> None:
     # Fetch global state
     data = _api_get("{}/api/sync".format(cfg["F2B_API_URL"]), cfg["F2B_API_KEY"])
     if data is None:
-        log.warning("SYNC failed — API request rejected or unreachable")
+        log.warning("SYNC failed - API request rejected or unreachable")
         return
 
     bans = data.get("bans", [])  # type: List[Dict]
@@ -302,20 +302,20 @@ Fail2BanEntreprise Agent
 Usage:
   f2b-agent ban  <ip> <jail> [bantime]   Report ban to central API
   f2b-agent unban <ip> [jail]            Log locally (Redis TTL handles expiry)
-  f2b-agent sync                         Pull global state → local ipset (once)
-  f2b-agent sync-loop                    Pull global state → local ipset (loop)
+  f2b-agent sync                         Pull global state -> local ipset (once)
+  f2b-agent sync-loop                    Pull global state -> local ipset (loop)
   f2b-agent help                         Show this help
 
-Configuration  →  /etc/f2b-agent.conf:
+Configuration  ->  /etc/f2b-agent.conf:
   F2B_API_URL       Dashboard URL  (required)
-  F2B_API_KEY       Per-server token from dashboard → Servers page (required)
+  F2B_API_KEY       Per-server token from dashboard -> Servers page (required)
   F2B_SYNC_INTERVAL Seconds between syncs (default: 60)
   F2B_IPSET_NAME    ipset name (default: f2b-global, type: hash:net)
 
 Auth model:
-  /api/ban   → x-api-key (per-server token)
-  /api/sync  → x-api-key (per-server token)
-  /api/unban → JWT only  (dashboard admins — not called by agent)
+  /api/ban   -> x-api-key (per-server token)
+  /api/sync  -> x-api-key (per-server token)
+  /api/unban -> JWT only  (dashboard admins - not called by agent)
 """
 
 
