@@ -20,8 +20,6 @@
 #   f2b-agent sync-loop
 # ─────────────────────────────────────────────────────────
 
-from __future__ import annotations
-
 import ipaddress
 import json
 import logging
@@ -32,14 +30,14 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Dict, List, Optional
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
 CONFIG_FILE = "/etc/f2b-agent.conf"
 LOG_FILE    = "/var/log/f2b-agent.log"
 
-DEFAULTS: dict[str, str] = {
+DEFAULTS: Dict[str, str] = {
     "F2B_API_URL":       "",
     "F2B_API_KEY":       "",
     "F2B_SYNC_INTERVAL": "60",
@@ -75,13 +73,13 @@ log = _setup_logging()
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-def _parse_conf(path: str) -> dict[str, str]:
+def _parse_conf(path: str) -> Dict[str, str]:
     """
     Parse a bash-style KEY="value" config file.
     Handles: unquoted, single-quoted, double-quoted values.
     Ignores comments and blank lines.
     """
-    result: dict[str, str] = {}
+    result: Dict[str, str] = {}
     if not os.path.isfile(path):
         return result
 
@@ -101,7 +99,7 @@ def _parse_conf(path: str) -> dict[str, str]:
     return result
 
 
-def load_config() -> dict[str, str]:
+def load_config() -> Dict[str, str]:
     cfg = {**DEFAULTS}
     cfg.update(_parse_conf(CONFIG_FILE))
     # Environment variables override the file
@@ -116,7 +114,7 @@ def load_config() -> dict[str, str]:
 
 # ── HTTP helpers ──────────────────────────────────────────────────────────────
 
-def _api_post(url: str, key: str, body: dict, timeout: int = 10) -> Optional[int]:
+def _api_post(url: str, key: str, body: Dict, timeout: int = 10) -> Optional[int]:
     """POST JSON to the API, return HTTP status code or None on error."""
     data = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -132,7 +130,7 @@ def _api_post(url: str, key: str, body: dict, timeout: int = 10) -> Optional[int
     )
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status
+            return resp.getcode()
     except urllib.error.HTTPError as exc:
         log.debug("HTTP POST error: %s", exc)
         return exc.code
@@ -141,7 +139,7 @@ def _api_post(url: str, key: str, body: dict, timeout: int = 10) -> Optional[int
         return None
 
 
-def _api_get(url: str, key: str, timeout: int = 15) -> Optional[dict]:
+def _api_get(url: str, key: str, timeout: int = 15) -> Optional[Dict]:
     """GET JSON from the API, return parsed dict or None on error."""
     req = urllib.request.Request(
         url,
@@ -165,7 +163,13 @@ def _api_get(url: str, key: str, timeout: int = 15) -> Optional[dict]:
 # ── ipset / iptables helpers ──────────────────────────────────────────────────
 
 def _run(*cmd: str, check: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(list(cmd), capture_output=True, text=True, check=check)
+    return subprocess.run(
+        list(cmd),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        universal_newlines=True,
+        check=check,
+    )
 
 
 def _ipset(*args: str) -> bool:
@@ -203,7 +207,7 @@ def ip_in_entry(ip: str, entry: str) -> bool:
 
 # ── Actions ───────────────────────────────────────────────────────────────────
 
-def action_ban(cfg: dict, ip: str, jail: str, bantime: int = 86400) -> None:
+def action_ban(cfg: Dict[str, str], ip: str, jail: str, bantime: int = 86400) -> None:
     log.info("BAN ip=%s jail=%s bantime=%d", ip, jail, bantime)
 
     code = _api_post(
@@ -232,7 +236,7 @@ def action_notify_unban(ip: str, jail: str = "unknown") -> None:
     )
 
 
-def action_sync(cfg: dict) -> None:
+def action_sync(cfg: Dict[str, str]) -> None:
     log.info("SYNC start")
 
     ipset_name = cfg["F2B_IPSET_NAME"]
@@ -250,8 +254,8 @@ def action_sync(cfg: dict) -> None:
         log.warning("SYNC failed — API request rejected or unreachable")
         return
 
-    bans:      list[dict] = data.get("bans",      [])
-    whitelist: list[str]  = data.get("whitelist", [])
+    bans = data.get("bans", [])  # type: List[Dict]
+    whitelist = data.get("whitelist", [])  # type: List[str]
 
     # Build new ipset atomically via a temp set
     tmp_name = f"{ipset_name}-tmp"
@@ -278,7 +282,7 @@ def action_sync(cfg: dict) -> None:
     log.info("SYNC done: %d IPs in %s", count, ipset_name)
 
 
-def action_sync_loop(cfg: dict) -> None:
+def action_sync_loop(cfg: Dict[str, str]) -> None:
     interval = int(cfg.get("F2B_SYNC_INTERVAL", 60))
     log.info("Starting sync-loop (interval=%ds)", interval)
     while True:
