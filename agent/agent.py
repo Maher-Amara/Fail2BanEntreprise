@@ -38,7 +38,7 @@ from typing import Dict, List, Optional
 CONFIG_FILE = "/etc/f2b-agent.conf"
 LOG_FILE    = "/var/log/f2b-agent.log"
 
-DEFAULTS: Dict[str, str] = {
+DEFAULTS = {  # type: Dict[str, str]
     "F2B_API_URL":       "",
     "F2B_API_KEY":       "",
     "F2B_SYNC_INTERVAL": "60",
@@ -212,7 +212,7 @@ def action_ban(cfg: Dict[str, str], ip: str, jail: str, bantime: int = 86400) ->
     log.info("BAN ip=%s jail=%s bantime=%d", ip, jail, bantime)
 
     code = _api_post(
-        f"{cfg['F2B_API_URL']}/api/ban",
+        "{}/api/ban".format(cfg["F2B_API_URL"]),
         cfg["F2B_API_KEY"],
         {"ip": ip, "jail": jail, "bantime": bantime},
     )
@@ -250,7 +250,7 @@ def action_sync(cfg: Dict[str, str]) -> None:
         _iptables_add_rule(ipset_name)
 
     # Fetch global state
-    data = _api_get(f"{cfg['F2B_API_URL']}/api/sync", cfg["F2B_API_KEY"])
+    data = _api_get("{}/api/sync".format(cfg["F2B_API_URL"]), cfg["F2B_API_KEY"])
     if data is None:
         log.warning("SYNC failed — API request rejected or unreachable")
         return
@@ -259,7 +259,7 @@ def action_sync(cfg: Dict[str, str]) -> None:
     whitelist = data.get("whitelist", [])  # type: List[str]
 
     # Build new ipset atomically via a temp set
-    tmp_name = f"{ipset_name}-tmp"
+    tmp_name = "{}-tmp".format(ipset_name)
     _ensure_ipset(tmp_name)
     _ipset("flush", tmp_name)
 
