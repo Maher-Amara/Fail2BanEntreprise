@@ -80,7 +80,7 @@ def _parse_conf(path: str) -> Dict[str, str]:
     Handles: unquoted, single-quoted, double-quoted values.
     Ignores comments and blank lines.
     """
-    result: Dict[str, str] = {}
+    result = {}  # type: Dict[str, str]
     if not os.path.isfile(path):
         return result
 
