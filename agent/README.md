@@ -21,6 +21,20 @@
 
 ---
 
+## 0) Server Inventory
+
+| IP Address         | Role      | OS        | Hostname   | Domain                | Hardened | Reason    |
+|--------------------|-----------|-----------|------------|-----------------------|----------| --------- |
+| 81.95.119.130      | FusionPBX | Debian 9  | pbx130     | pbx130.stcall.be      | no       | SSH acess |
+| 81.95.119.153      | FusionPBX | Debian 9  | pbx153     | pbx153.stcall.be      | no       | Old OS    |
+| 213.144.214.200    | FusionPBX | Debian 12 | pbx200     | pbx200.scopcall.eu    | no       | Old OS    |
+| 213.144.214.244    | FusionPBX | Debian    | pbx244     | pbx244.scopcall.eu    | no       | Old OS    |
+| 81.95.124.53       | Vicidial  | openSUSE  | crm53      | crm53.stcall.be       | no       | Old OS    |
+| 213.144.214.241    | Vicidial  | openSUSE  | crm241     | crm241.scopcall.eu    | no       | Old OS    |
+| 213.144.214.243    | Vicidial  | openSUSE  | crm243     | crm243.scopcall.eu    | no       | Old OS    |
+| 213.144.214.249    | Docker    | Debian    | docker249  | docker249.scopcall.eu | no       | Old OS    |
+| 213.144.214.252    | Docker    | Debian    | docker252  | docker252.scopcall.eu | no       | Old OS    |
+
 ## Step 1 — Clone the Repository in Home Directory
 
 ```bash
