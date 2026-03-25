@@ -23,17 +23,17 @@
 
 ## 0) Server Inventory
 
-| IP Address         | Role      | OS        | Hostname   | Domain                | Hardened | Reason    |
-|--------------------|-----------|-----------|------------|-----------------------|----------| --------- |
-| 81.95.119.130      | FusionPBX | Debian 9  | pbx130     | pbx130.stcall.be      | no       | SSH acess |
-| 81.95.119.153      | FusionPBX | Debian 9  | pbx153     | pbx153.stcall.be      | no       | Old OS    |
-| 213.144.214.200    | FusionPBX | Debian 12 | pbx200     | pbx200.scopcall.eu    | no       | Old OS    |
-| 213.144.214.244    | FusionPBX | Debian    | pbx244     | pbx244.scopcall.eu    | no       | Old OS    |
-| 81.95.124.53       | Vicidial  | openSUSE  | crm53      | crm53.stcall.be       | no       | Old OS    |
-| 213.144.214.241    | Vicidial  | openSUSE  | crm241     | crm241.scopcall.eu    | no       | Old OS    |
-| 213.144.214.243    | Vicidial  | openSUSE  | crm243     | crm243.scopcall.eu    | no       | Old OS    |
-| 213.144.214.249    | Docker    | Debian    | docker249  | docker249.scopcall.eu | no       | Old OS    |
-| 213.144.214.252    | Docker    | Debian    | docker252  | docker252.scopcall.eu | no       | Old OS    |
+| IP Address         | Role      | OS        | Hostname   | Domain                | F2BE | Reason    |
+|--------------------|-----------|-----------|------------|-----------------------|----- | --------- |
+| 81.95.119.130      | FusionPBX | Debian 9  | pbx130     | pbx130.stcall.be      | no   | SSH acess |
+| 81.95.119.153      | FusionPBX | Debian 9  | pbx153     | pbx153.stcall.be      | no   | Old OS    |
+| 213.144.214.200    | FusionPBX | Debian 12 | pbx200     | pbx200.scopcall.eu    | yes  |           |
+| 213.144.214.244    | FusionPBX | Debian 12 | pbx244     | pbx244.scopcall.eu    | yes  |           |
+| 81.95.124.53       | Vicidial  | openSUSE  | crm53      | crm53.stcall.be       | no   | Old OS    |
+| 213.144.214.241    | Vicidial  | openSUSE  | crm241     | crm241.scopcall.eu    |      |           |
+| 213.144.214.243    | Vicidial  | openSUSE  | crm243     | crm243.scopcall.eu    |      |           |
+| 213.144.214.249    | Docker    | Debian    | docker249  | docker249.scopcall.eu |      |           |
+| 213.144.214.252    | Docker    | Debian    | docker252  | docker252.scopcall.eu |      |           |
 
 ## Step 1 — Clone the Repository in Home Directory
 
@@ -59,42 +59,35 @@ zypper install fail2ban ipset
 apt-get update && apt-get install -y fail2ban ipset
 ```
 
----
-
-## Step 3 — Register This Server in the Dashboard
-
-1. Log in at **<https://f2b.scopcall.com>**
-2. Go to **Servers → Register New Server**
-3. Enter this server's hostname (e.g. `dialer1.callpro.be`)
-4. Copy the generated token — **shown only once**
-
----
-
-## Step 4 — Install the Agent
+## Step 3 — Install the Agent
 
 ```bash
 # Copy agent binary
-cp agent.py /usr/local/bin/f2b-agent
-chmod +x /usr/local/bin/f2b-agent
+sudo cp agent.py /usr/local/bin/f2b-agent
+sudo chmod +x /usr/local/bin/f2b-agent
+sudo cp f2b-agent.conf /etc/f2b-agent.conf
 
 # Verify
 f2b-agent help
 ```
 
----
+## Step 4 — Register This Server in the Dashboard
 
-## Step 5 — Configure the Agent
+1. Log in at **<https://f2b.scopcall.com>**
+2. Go to **Servers → Register New Server**
+3. Enter this server's hostname (e.g. `dialer1.callpro.be`)
+4. Copy the generated token — **shown only once**
+5. Configure the Agent
 
 ```bash
-cp f2b-agent.conf /etc/f2b-agent.conf
-nano /etc/f2b-agent.conf
+sudo nano /etc/f2b-agent.conf
 ```
 
 Set your token:
 
 ```ini
 F2B_API_URL="https://f2b.scopcall.com"
-F2B_API_KEY="your-server-token-here"   # from Step 2
+F2B_API_KEY="your-server-token-here"
 F2B_SYNC_INTERVAL=60
 F2B_IPSET_NAME="f2b-global"
 ```
@@ -104,7 +97,7 @@ F2B_IPSET_NAME="f2b-global"
 ## Step 6 — Install Fail2Ban Action
 
 ```bash
-cp f2be.conf /etc/fail2ban/action.d/f2be.conf
+sudo cp f2be.conf /etc/fail2ban/action.d/f2be.conf
 ```
 
 ---
@@ -115,7 +108,7 @@ Choose the file that matches your platform:
 
 ```bash
 # ViciDial / ViciBox
-cp vicidial.conf /etc/fail2ban/jail.local
+sudo cp vicidial.conf /etc/fail2ban/jail.local
 
 # FusionPBX
 sudo cp fusionpbx.conf /etc/fail2ban/jail.local
@@ -128,7 +121,7 @@ sudo cp debian.conf /etc/fail2ban/jail.local
 
 ```ini
 # Already set in all configs — adjust if needed:
-ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.53/26
+ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.193/26 81.95.124.1/26 81.95.119.129/26
 ```
 
 ---

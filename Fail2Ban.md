@@ -284,7 +284,7 @@ Create or edit `/etc/fail2ban/jail.local`:
 [DEFAULT]
 # ── IPs that will NEVER be banned ──
 # Office IP  |  Datacenter FR (server subnet)  |  Datacenter BE
-ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.53/26
+ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.193/26 81.95.124.1/26 81.95.119.129/26
 
 # ── Ban Parameters ──
 bantime   = 86400       ; 24 hours default (override per-jail as needed)
