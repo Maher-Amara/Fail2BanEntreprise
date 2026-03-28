@@ -1,0 +1,289 @@
+# Understanding Our Current Fail2Ban + iptables + ipset Setup
+
+## Purpose
+
+Document the current state, desired target state, and a step‑by‑step remediation plan to standardize on an ipset‑based Fail2Ban model across all hosts.
+
+Related implementation docs:
+
+- `linux/README.md` — baseline SSH hardening
+- `Fail2BanEntreprise/agent/README.md` — agent, actions, and jail installation
+
+## Components (what each piece does)
+
+- **iptables**: the firewall that applies packet filtering rules.
+- **Fail2Ban**: scans logs, detects abuse, and triggers ban/unban actions.
+- **ipset**: efficient in‑kernel sets of IPs; iptables can match “is IP in set?” in O(1).
+
+## Current State (observed)
+
+- A single global ipset exists: `f2b-global`.
+- Many bans are written as individual `iptables` rules per IP (per‑jail chains), not into `ipset`.
+- Mixed models in use:
+  - Old model: Fail2Ban inserts per‑IP rules directly into iptables chains.
+  - New model: Fail2Ban writes into ipset (e.g., `f2b-global`) and iptables has one match rule against that set.
+- Rule ordering problems in `iptables` reduce effectiveness and may allow traffic through prematurely.
+- Large rule counts under some jails (e.g., `f2b-SSH` with 200+ `REJECT` rules) cause slowness and higher CPU usage.
+
+## Target Architecture (desired)
+
+- Use Fail2Ban to manage bans and unbans exclusively.
+- Store banned IPs in ipset, not as per‑IP `iptables` rules.
+- One or few iptables rules reference ipset sets (global or per‑jail), placed correctly in rule order.
+- Visibility lives in Fail2Ban:
+  - `fail2ban-client status` shows all active jails and bans.
+  - ipset contains the actual blocked IP lists.
+
+Two possible ipset layouts:
+
+1) **Single global set**: `f2b-global` (simpler)
+2) **Per‑jail sets**: e.g., `f2b-ssh`, `f2b-sip`, `f2b-web` (better visibility/control)
+
+We prefer per‑jail sets to mirror Fail2Ban jails for clarity and selective unban if needed.
+
+## Critical Issues (to fix)
+
+- **CRITICAL #1 — Bad default accept rule**
+  - An unconditional `ACCEPT all -- anywhere anywhere` near the top effectively bypasses later drop rules. This must be removed or moved after stateful/allow rules and before final drops only if strictly required for a specific chain.
+- **CRITICAL #2 — Mixed models**
+  - ❌ Old: Fail2Ban writes per‑IP iptables rules.
+  - ✅ New: Fail2Ban writes to ipset; iptables matches ipset.
+- **CRITICAL #3 — Rule order**
+  - Good: `ACCEPT state RELATED,ESTABLISHED` early in `INPUT`.
+  - Bad: Broad `ACCEPT all` before security checks or ipset drops.
+- **Performance problem**
+  - Hundreds of per‑IP `REJECT`/`DROP` rules in `iptables` are slow and not scalable vs. a single ipset match.
+
+## Current iptables snapshot
+
+Observed `INPUT` chain highlights:
+
+- `policy DROP` is good.
+- Early `f2b-Nginx-DOS`, `f2b-SSH`, `f2b-sshd`, `sip-auth-fail`, `sip-auth-ip` chains with hundreds of per‑IP `REJECT`/`DROP` entries → performance issue.
+- A global ipset rule exists: `DROP all -- match-set f2b-global src` (good), but it is not consistently the first security decision after stateful accept.
+- An unconditional `ACCEPT all -- anywhere anywhere` appears before `ACCEPT state RELATED,ESTABLISHED` and before ipset drops → bypass risk.
+- Duplicate SSH jails (`f2b-SSH` and `f2b-sshd`) present → overlapping responsibility.
+- Multiple SIP “STRING match” signature drops per port (sip/sip-alt) → should be consolidated under a Fail2Ban jail + ipset action instead of many static rules.
+
+Implications:
+
+- Rule ordering currently weakens enforcement and wastes CPU.
+- Per‑IP rules balloon chain sizes; we should migrate to ipset‑only enforcement via Fail2Ban actions.
+
+## Baseline firewall policy (desired order)
+
+1. ACCEPT state RELATED,ESTABLISHED
+2. ACCEPT whitelist (ipset), e.g., `f2b-whitelist`
+3. DROP blacklist (ipset), e.g., per‑jail sets like `f2b-ssh`, `f2b-sip`, and/or `f2b-global`
+4. DROP “bad protocol/patterns” via dedicated ipset or Fail2Ban jail (avoid large static STRING rules)
+5. ACCEPT required services (ssh, http/https, sip/rtp, vpn, etc.)
+6. Final DROP (policy or explicit)
+
+Notes:
+
+- Steps 2–4 should be small in rule count by leveraging ipset matches (1 rule per set), not per‑IP/per‑signature rules.
+- Any broad `ACCEPT all` rule must be removed; only specific service ACCEPTs should remain.
+
+## Remediation Plan
+
+1) Baseline hygiene (from `linux/README.md`)
+   - Harden SSH (keys only, no root login).
+   - Ensure user access and inventory are correct.
+2) Standardize Fail2Ban actions (from `Fail2BanEntreprise/agent/README.md`)
+   - Install `f2be.conf` action which writes to ipset.
+   - Configure jails to use `f2be` and per‑jail ipset sets (or global if we choose).
+3) Create ipset sets
+   - Per‑jail example: `f2b-ssh`, `f2b-sip`, `f2b-web` (hash:ip, timeout where applicable).
+4) Replace iptables per‑IP rules with ipset matches
+   - Add exactly one `-m set --match-set <set> src -j DROP` (or `REJECT`) per set.
+   - Place these rules correctly in the `INPUT` chain before generic accepts.
+5) Fix rule ordering
+   - Keep `ACCEPT state RELATED,ESTABLISHED` early.
+   - Remove any unconditional early `ACCEPT all`.
+   - Ensure ipset drop rules are evaluated before broader accepts.
+6) Clean up legacy rules
+   - Flush per‑IP rules injected by legacy Fail2Ban actions (after ipset path is confirmed working).
+7) Visibility and ops
+   - Use `fail2ban-client status <jail>` for counts and current bans.
+   - Use `ipset list <set>` to inspect actual blocked IPs.
+   - Keep agent running for central sync if used.
+
+## Improve Fail2Ban filters (quality and testing)
+
+Goals:
+
+- Reduce false positives/negatives by tightening filters and using log‑specific patterns.
+- Consolidate many static iptables STRING rules (e.g., SIP scanners) into Fail2Ban filters that ban into ipset.
+- Ensure per‑platform logging backends are correct (Debian=file, ViciBox=systemd) so filters see all events.
+
+Primary jails and filters to review:
+
+- Debian/FusionPBX:
+  - `sshd` → filter `sshd.conf` (Debian: `/var/log/auth.log`)
+  - `nginx-*` → `nginx-404`, `nginx-dos`, `nginx-http-auth` (Nginx logs)
+  - `fusionpbx`, `fusionpbx-mac` (FusionPBX logs)
+  - `postfix`, `postfix-sasl` (mail logs)
+  - `recidive` (Fail2Ban log aggregation)
+- ViciDial/openSUSE:
+  - `sshd[mode=normal]` with `backend=systemd`
+  - `asterisk` (Asterisk logs)
+  - `apache-*` (openSUSE log naming: `error_log`, `access_log`)
+  - Optional: `vicibox-portal`, `mysqld-auth`, `phpmyadmin-syslog` when applicable
+
+Testing workflow with `fail2ban-regex`:
+
+- Debian/FusionPBX examples:
+
+```bash
+sudo fail2ban-regex /var/log/auth.log /etc/fail2ban/filter.d/sshd.conf
+sudo fail2ban-regex "/var/log/nginx/access.log" /etc/fail2ban/filter.d/nginx-dos.conf
+sudo fail2ban-regex /var/log/freeswitch/freeswitch.log /etc/fail2ban/filter.d/freeswitch-ip.conf
+sudo fail2ban-regex /var/log/mail.log /etc/fail2ban/filter.d/postfix.conf
+```
+
+- ViciDial/openSUSE examples:
+
+```bash
+# systemd backend: dump a sample to a file first for regex testing
+sudo journalctl -u sshd -n 5000 --no-pager > /tmp/sshd.log
+sudo fail2ban-regex /tmp/sshd.log /etc/fail2ban/filter.d/sshd.conf
+
+sudo fail2ban-regex /var/log/asterisk/messages /etc/fail2ban/filter.d/asterisk.conf
+sudo fail2ban-regex /var/log/apache2/error_log /etc/fail2ban/filter.d/apache-auth.conf
+sudo fail2ban-regex /var/log/apache2/access_log /etc/fail2ban/filter.d/apache-badbots.conf
+```
+
+Filter design guidelines:
+
+- Anchor regexes to log structure to avoid backtracking and misses.
+- Create per‑signature variants only if needed; prefer one robust pattern per failure mode.
+- Add IPv6 support where applicable.
+- Keep `failregex` minimal and `ignoreregex` explicit for known benign patterns.
+- For high‑volume services (SIP, HTTP), prefer fewer, more selective matches to avoid CPU spikes.
+
+Deployment process:
+
+1) Draft or refine the filter in `/etc/fail2ban/filter.d/*.conf`.
+2) Validate on real logs with `fail2ban-regex` until FP/FN are acceptable.
+3) Wire the jail to `action = f2be[...]` so bans land in the right ipset.
+4) Reload and verify:
+   - `sudo fail2ban-client reload`
+   - `sudo fail2ban-client status <jail>`
+   - `sudo ipset list f2b-<jail> | head`
+
+Metrics to watch:
+
+- FP rate on admin IPs: should be zero; use `ignoreip` for office/VPN subnets.
+- Ban volume per jail over time: unexpected spikes imply filter looseness or an attack.
+- CPU usage of `fail2ban-server` and regex evaluation time on busiest logs.
+
+## Host‑specific migration
+
+1) Create/confirm ipsets
+   - Whitelist: `f2b-whitelist` (hash:ip)
+   - Blacklists per jail: `f2b-ssh`, `f2b-sip` (hash:ip timeout <policy>), and keep `f2b-global`
+2) Switch Fail2Ban jails to ipset action
+   - Ensure `f2be.conf` is installed and active
+   - Set `action = f2be[name=<jail>, setname=f2b-<jail>]` in relevant jails
+   - Avoid duplicate jails for SSH (`f2b-SSH` vs `f2b-sshd`) — keep one
+3) Reorder `INPUT` chain
+   - Place `ACCEPT state RELATED,ESTABLISHED` first
+   - Add `ACCEPT -m set --match-set f2b-whitelist src`
+   - Add `DROP -m set --match-set f2b-ssh src` and `DROP -m set --match-set f2b-sip src` (and/or `f2b-global`) before service ACCEPTs
+   - Keep service ACCEPTs (ssh/http/https/sip/rtp/vpn) next
+   - Ensure final DROP is policy or explicit at the end
+4) Remove legacy per‑IP rules
+   - Flush massive per‑IP entries in `f2b-SSH`, `f2b-sshd`, `sip-auth-fail`, `sip-auth-ip` after ipset path is verified
+   - Replace SIP signature rules with a Fail2Ban jail that bans into `f2b-sip`
+5) Verify
+   - `iptables -L INPUT -n --line-numbers` shows short, ordered rules
+   - `fail2ban-client status` shows bans; `ipset list f2b-ssh`/`f2b-sip` reflect members
+   - Traffic allowed/blocked per policy
+
+## Next actions for config files
+
+- `Fail2BanEntreprise/agent/debian.conf`
+  - Switch `banaction` and all enabled jails to use `f2be` (ipset), not per‑IP chains.
+  - Ensure `sshd` jail uses only one SSH jail and is tuned (maxretry/findtime) per our policy.
+- `Fail2BanEntreprise/agent/fusionpbx.conf`
+  - Confirm all shipped FusionPBX filters exist; disable ones missing on host.
+  - Tighten `nginx-dos` thresholds; validate with `fail2ban-regex` on Nginx logs.
+  - SIP protections (`freeswitch-ip`, `auth-challenge-ip`) must ban into ipset via `f2be`.
+- `Fail2BanEntreprise/agent/vicidial.conf`
+  - Confirm `backend=systemd` for `sshd` and mail jails on openSUSE/SLES.
+  - Validate `asterisk` filter on `/var/log/asterisk/messages` with `fail2ban-regex`.
+  - Align Apache filters with openSUSE `*_log` filenames.
+
+## Verification Checklist (commands)
+
+Firewall chains and order:
+
+```bash
+sudo iptables -S INPUT
+sudo iptables -L INPUT -n --line-numbers
+```
+
+ipset sets and members:
+
+```bash
+sudo ipset list | sed -n '1,120p'
+sudo ipset list f2b-ssh | head -50
+sudo ipset list f2b-global | head -50
+```
+
+Fail2Ban jails and bans:
+
+```bash
+sudo fail2ban-client status
+sudo fail2ban-client status sshd
+```
+
+Agent and action deploy:
+
+```bash
+sudo systemctl status f2b-agent --no-pager
+sudo ls -l /etc/fail2ban/action.d/f2be.conf
+sudo ls -l /etc/fail2ban/jail.local
+```
+
+## Policy Decisions
+
+- Use per‑jail ipset sets for clarity and control.
+- Default action is `DROP` via iptables for matched banned IPs.
+- All manual bans/unbans go through Fail2Ban:
+  - Ban: `fail2ban-client set <jail> banip <ip>`
+  - Unban: `fail2ban-client set <jail> unbanip <ip>`
+  - Never add/remove IPs directly in `iptables`; let Fail2Ban manage ipset.
+
+## Mapping to Implementation Docs
+
+- Host hardening and SSH policy → `linux/README.md`
+- Agent install, action `f2be.conf`, and jails → `Fail2BanEntreprise/agent/README.md`
+- After install:
+  - Ensure `jail.local` uses the `f2be` action for relevant jails.
+  - Ensure ipset sets exist (created on first use or pre‑created with timeouts).
+  - Ensure iptables has one rule per set, in correct order.
+
+## Alerts (optional next step)
+
+- Notify on:
+  - SSH logins from new/unrecognized IPs
+  - ICMP echo (ping) attempts blocked
+  - Port scans or repeated SIP failures
+- Data sources:
+  - Fail2Ban logs and ban events
+  - iptables counters per ipset rule
+
+## Open Questions
+
+- Do we require a global set (`f2b-global`) in addition to per‑jail sets for emergency/blacklist entries?
+- Preferred default verdict: `DROP` vs `REJECT` per service?
+- Unified retention/timeout policy per jail (e.g., 10m, 1h, 24h)?
+
+## Success Criteria (definition of done)
+
+- No unconditional early `ACCEPT all` rules.
+- `INPUT` chain has early `RELATED,ESTABLISHED` accept and correctly ordered ipset drops.
+- Fail2Ban jails use `f2be` action; bans appear in `fail2ban-client status`.
+- iptables contains only a small, fixed number of rules for ipset matches (not 100s of per‑IP rules).
+- ipset membership reflects current bans; adding/removing via Fail2Ban updates ipset immediately.
