@@ -5,7 +5,7 @@ Wants=network-pre.target
 
 [Service]
 Type=oneshot
-ExecStart=/sbin/ipset restore -exist -file /etc/ipset.conf
+ExecStart=/usr/sbin/ipset restore -exist -file /etc/ipset.conf
 RemainAfterExit=yes
 
 [Install]
