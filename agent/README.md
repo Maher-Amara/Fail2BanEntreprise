@@ -118,11 +118,8 @@ sudo ipset add whitelist ${MYIP} -exist
 sudo ipset test whitelist ${MYIP} || true
 ```
 
-Persist ipset across reboots:
 
-```bash
-sudo ipset save | sudo tee /etc/ipset.conf >/dev/null
-```
+### Insert minimal, ordered iptables rules (idempotent)
 
 Target order in `INPUT`:
 
@@ -131,8 +128,6 @@ Target order in `INPUT`:
 3. `DROP` per‑category ipset sets (`ssh`, `sip`, `db`, `web`, `proxy`, `email`) and/or `blacklist`
 4. Service‑specific `ACCEPT`s (ssh/http/https/sip/rtp/vpn)
 5. Final policy `DROP` (or explicit)
-
-### Insert minimal, ordered iptables rules (idempotent)
 
 ```bash
 # 1. Early stateful accept
@@ -177,6 +172,47 @@ sudo systemctl status ipset-restore    --no-pager
 ## Step 4 — Install Fail2Ban Actions (ipset + f2be)
 
 ```bash
+sudo cp action.d/f2be.conf  /etc/fail2ban/action.d/f2be.conf
+sudo cp action.d/ipset.conf /etc/fail2ban/action.d/ipset.conf
+```
+
+## Step 5 — Install jail.local (per‑platform baseline)
+
+Choose the file that matches your platform:
+
+```bash
+# ViciDial / ViciBox
+sudo cp jails/vicidial.conf /etc/fail2ban/jail.local
+
+# FusionPBX
+sudo cp jails/fusionpbx.conf /etc/fail2ban/jail.local
+
+# Generic Debian
+sudo cp
+
+> **⚠️ Before reloading:** Edit `jail.local` and verify the `ignoreip` line includes your office IP and VPN exit IP. Getting blocked by any jail locks out SSH + web + SIP simultaneously.
+
+```ini
+# Already set in all configs — adjust if needed:
+ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.193/26 81.95.124.1/26 81.95.119.129/26
+```
+
+## Step 6 — Enable and Reload Fail2Ban
+
+```bash
+sudo systemctl enable fail2ban
+sudo systemctl restart fail2ban
+
+# Verify jails are active
+sudo fail2ban-client status
+
+# Verify agent is syncing
+sudo journalctl -u f2b-agent -f
+```
+
+## Step 7 — Install the Agent
+
+```bash
 # Copy agent binary
 sudo cp agent.py /usr/local/bin/f2b-agent
 sudo chmod +x /usr/local/bin/f2b-agent
@@ -185,8 +221,7 @@ sudo cp f2b-agent.conf.example /etc/f2b-agent.conf
 # Verify
 f2b-agent help
 ```
-
-## Step 9 — Register This Server in the Dashboard
+## Step 8 — Register This Server in the Dashboard
 
 1. Enter this server's hostname (e.g. `dialer1.callpro.be`)
 
@@ -209,58 +244,8 @@ f2b-agent help
     F2B_API_KEY="your-server-token-here"
     ```
 
----
 
-## Step 5 — Install jail.local (per‑platform baseline)
-
-```bash
-sudo cp action.d/f2be.conf  /etc/fail2ban/action.d/f2be.conf
-sudo cp action.d/ipset.conf /etc/fail2ban/action.d/ipset.conf
-```
-
----
-
-## Step 6 — Enable and Reload Fail2Ban
-
-Choose the file that matches your platform:
-
-```bash
-# ViciDial / ViciBox
-sudo cp jails/vicidial.conf /etc/fail2ban/jail.local
-
-# FusionPBX
-sudo cp jails/fusionpbx.conf /etc/fail2ban/jail.local
-
-# Generic Debian
-sudo cp jails/debian.conf /etc/fail2ban/jail.local
-```
-
-> **⚠️ Before reloading:** Edit `jail.local` and verify the `ignoreip` line includes your office IP and VPN exit IP. Getting blocked by any jail locks out SSH + web + SIP simultaneously.
-
-```ini
-# Already set in all configs — adjust if needed:
-ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.193/26 81.95.124.1/26 81.95.119.129/26
-```
-
----
-
----
-
-## Step 7 — Install the Agent
-
-```bash
-# Copy agent binary
-sudo cp agent.py /usr/local/bin/f2b-agent
-sudo chmod +x /usr/local/bin/f2b-agent
-sudo cp f2b-agent.conf.example /etc/f2b-agent.conf
-
-# Verify
-f2b-agent help
-```
-
----
-
-## Step 8 — Register This Server in the Dashboard
+##  Step 9 — Install agent systemd service
 
 ```bash
 sudo cp system/f2b-agent.service /etc/systemd/system/f2b-agent.service
@@ -268,21 +253,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable f2b-agent
 sudo systemctl restart f2b-agent
 sudo systemctl status f2b-agent --no-pager
-```
-
----
-
----
-
-## Step 9 — Install Systemd Service (agent sync)
-
-```bash
-sudo systemctl enable fail2ban
-sudo systemctl restart fail2ban
-
-# Verify jails are active
-sudo fail2ban-client status
-
-# Verify agent is syncing
-sudo journalctl -u f2b-agent -f
 ```

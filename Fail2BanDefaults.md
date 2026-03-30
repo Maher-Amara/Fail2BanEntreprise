@@ -275,7 +275,6 @@ crm231:/etc/fail2ban> ls /etc/fail2ban/filter.d/ | sort
 apache-auth.conf
 apache-badbots.conf
 apache-botsearch.conf
-apache-common.conf
 apache-fakegooglebot.conf
 apache-modsecurity.conf
 apache-nohome.conf
@@ -286,9 +285,7 @@ apache-shellshock.conf
 assp.conf
 asterisk.conf
 bitwarden.conf
-botsearch-common.conf
 centreon.conf
-common.conf
 counter-strike.conf
 courier-auth.conf
 courier-smtp.conf
@@ -299,7 +296,6 @@ dovecot.conf
 dropbear.conf
 drupal-auth.conf
 ejabberd-auth.conf
-exim-common.conf
 exim.conf
 exim-spam.conf
 freeswitch.conf
@@ -339,7 +335,6 @@ qmail.conf
 recidive.conf
 roundcube-auth.conf
 screensharingd.conf
-selinux-common.conf
 selinux-ssh.conf
 sendmail-auth.conf
 sendmail-reject.conf
