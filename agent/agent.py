@@ -200,6 +200,13 @@ def _ipset_sets() -> List[str]:
     return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
+def _fail2ban_unban(ip: str) -> bool:
+    """Run fail2ban-client unban <ip>, return True on success."""
+    # This works in modern Fail2Ban to unban from all jails
+    result = _run("fail2ban-client", "unban", ip)
+    return result.returncode == 0
+
+
 def _ipset_members(set_name: str) -> List[str]:
     """Return members of an ipset set (IPs or CIDRs depending on type)."""
     proc = _run("ipset", "list", set_name)
@@ -311,9 +318,16 @@ def action_sync(cfg: Dict[str, str]) -> None:
 
     bans = data.get("bans", [])  # type: List[Dict]
     whitelist = data.get("whitelist", [])  # type: List[str]
+    whitelist_set = cfg.get("F2B_IPSET_WHITELIST_NAME", "whitelist")
 
     # Build desired membership per target set
-    desired_by_set = {s: set() for s in target_sets}  # type: Dict[str, set]
+    # We include ban target sets AND the whitelist set for reconciliation
+    all_managed = target_sets + ([whitelist_set] if whitelist_set else [])
+    desired_by_set = {s: set() for s in all_managed}  # type: Dict[str, set]
+
+    # Populate the whitelist set
+    if whitelist_set:
+        desired_by_set[whitelist_set] = set(whitelist)
 
     # Distribute bans into per-jail sets; fallback to blacklist if no match
     for ban in bans:
@@ -359,6 +373,9 @@ def action_sync(cfg: Dict[str, str]) -> None:
         for ip in to_del:
             # Best-effort delete; ignore failures
             _ipset("del", set_name, ip)
+            # Only unban from Fail2Ban if it was a ban set (not the whitelist)
+            if set_name != whitelist_set:
+                _fail2ban_unban(ip)
             dels += 1
         results.append("{}:+{} -{}".format(set_name, adds, dels))
 
