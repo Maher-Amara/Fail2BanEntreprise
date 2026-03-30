@@ -110,9 +110,9 @@ Immediately whitelist baseline IPs (including your current IP):
 # Add baseline entries (CIDRs supported by whitelist hash:net)
 sudo ipset add whitelist 127.0.0.1 -exist
 sudo ipset add whitelist 196.179.222.182 -exist
-sudo ipset add whitelist 213.144.214.193/26 -exist
-sudo ipset add whitelist 81.95.124.1/26 -exist
-sudo ipset add whitelist 81.95.119.129/26 -exist
+sudo ipset add whitelist 213.144.214.192/26 -exist
+sudo ipset add whitelist 81.95.124.0/26 -exist
+sudo ipset add whitelist 81.95.119.128/26 -exist
 sudo ipset add whitelist ${MYIP} -exist
 
 # Quick checks: membership and rule presence
