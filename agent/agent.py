@@ -217,7 +217,7 @@ def _ipset_members(set_name: str) -> List[str]:
         return []
     members_block = out.split("Members:", 1)[1]
     return [
-        line.strip()
+        _normalize_entry(line.strip())
         for line in members_block.splitlines()
         if line.strip()
     ]
@@ -259,6 +259,19 @@ def ip_in_entry(ip: str, entry: str) -> bool:
         )
     except ValueError:
         return False
+
+
+def _normalize_entry(entry: str) -> str:
+    """Normalize IP or CIDR using ipaddress library to match ipset's format."""
+    if not entry:
+        return ""
+    try:
+        # strict=False handles the automatic masking (e.g. .193/26 -> .192/26)
+        net = ipaddress.ip_network(entry.strip(), strict=False)
+        # ipset list displays individual IPs without mask suffixes
+        return str(net.network_address) if net.num_addresses == 1 else str(net)
+    except ValueError:
+        return entry.strip()
 
 
 # ── Actions ────────────────────────────────────────────────────────────────
@@ -327,11 +340,13 @@ def action_sync(cfg: Dict[str, str]) -> None:
 
     # Populate the whitelist set
     if whitelist_set:
-        desired_by_set[whitelist_set] = set(whitelist)
+        desired_by_set[whitelist_set] = {
+            _normalize_entry(wl) for wl in whitelist if wl
+        }
 
     # Distribute bans into per-jail sets; fallback to blacklist if no match
     for ban in bans:
-        ip = ban.get("ip", "")
+        ip = _normalize_entry(ban.get("ip", ""))
         if not ip:
             continue
         jail = str(ban.get("jail", "") or "").lower()
