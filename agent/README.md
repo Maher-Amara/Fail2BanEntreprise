@@ -42,16 +42,17 @@
 
 ## 0) Server Inventory
 
-| IP Address         | Role       | OS          | Hostname   | Domain                | F2BE | Reason      |
-|--------------------|------------|-------------|------------|-----------------------|------|-------------|
-| 81.95.119.130      | FusionPBX  | Debian 9    | pbx130     | pbx130.stcall.be      | yes  | SSH acess   |
-| 81.95.119.153      | FusionPBX  | Debian 9    | pbx153     | pbx153.stcall.be      | no   | FA Fierwall |
-| 213.144.214.200    | FusionPBX  | Debian 12   | pbx200     | pbx200.scopcall.eu    | yes  |             |
-| 213.144.214.244    | FusionPBX  | Debian 12   | pbx244     | pbx244.scopcall.eu    | yes  |             |
-| 81.95.124.53       | ViciBox 10 | openSUSE    | crm53      | crm53.stcall.be       | no   | Old OS      |
-| 213.144.214.241    | Vicidial 9 | openSUSE 15 | crm241     | crm241.scopcall.eu    | no   | Old OS      |
-| 213.144.214.243    | Vicidial 9 | openSUSE 15 | crm243     | crm243.scopcall.eu    |      |             |
-| 213.144.214.252    | Docker     | Debian      | docker252  | docker252.scopcall.eu |      |             |
+| IP Address         | Role       | OS            | Hostname   | Domain                | F2BE | Reason      |
+|--------------------|------------|---------------|------------|-----------------------|------|-------------|
+| 81.95.119.130      | FusionPBX  | Debian 9      | pbx130     | pbx130.stcall.be      | yes  | SSH acess   |
+| 81.95.119.153      | FusionPBX  | Debian 9      | pbx153     | pbx153.stcall.be      | no   | FA Fierwall |
+| 213.144.214.200    | FusionPBX  | Debian 12     | pbx200     | pbx200.scopcall.eu    | yes  |             |
+| 213.144.214.244    | FusionPBX  | Debian 12     | pbx244     | pbx244.scopcall.eu    | yes  |             |
+| 81.95.124.53       | ViciBox 10 | openSUSE      | crm53      | crm53.stcall.be       | no   | Old OS      |
+| 213.144.214.231    | ViciBox 12 | openSUSE 15.6 | crm231     | crm231.scopcall.eu    | yes  |             |
+| 213.144.214.241    | Vicidial 9 | openSUSE 15   | crm241     | crm241.scopcall.eu    | no   | Old OS      |
+| 213.144.214.243    | Vicidial 9 | openSUSE 15   | crm243     | crm243.scopcall.eu    |      |             |
+| 213.144.214.252    | Docker     | Debian        | docker252  | docker252.scopcall.eu |      |             |
 
 ## Step 1 — Clone the Repository in Home Directory
 
@@ -188,13 +189,13 @@ sudo cp jails/vicidial.conf /etc/fail2ban/jail.local
 sudo cp jails/fusionpbx.conf /etc/fail2ban/jail.local
 
 # Generic Debian
-sudo cp
+sudo cp jails/debian.conf /etc/fail2ban/jail.local
 
 > **⚠️ Before reloading:** Edit `jail.local` and verify the `ignoreip` line includes your office IP and VPN exit IP. Getting blocked by any jail locks out SSH + web + SIP simultaneously.
 
 ```ini
 # Already set in all configs — adjust if needed:
-ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.193/26 81.95.124.1/26 81.95.119.129/26
+ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.0/26 81.95.119.128/26
 ```
 
 ## Step 6 — Enable and Reload Fail2Ban
@@ -205,9 +206,6 @@ sudo systemctl restart fail2ban
 
 # Verify jails are active
 sudo fail2ban-client status
-
-# Verify agent is syncing
-sudo journalctl -u f2b-agent -f
 ```
 
 ## Step 7 — Install the Agent
@@ -221,6 +219,7 @@ sudo cp f2b-agent.conf.example /etc/f2b-agent.conf
 # Verify
 f2b-agent help
 ```
+
 ## Step 8 — Register This Server in the Dashboard
 
 1. Enter this server's hostname (e.g. `dialer1.callpro.be`)
@@ -253,4 +252,23 @@ sudo systemctl daemon-reload
 sudo systemctl enable f2b-agent
 sudo systemctl restart f2b-agent
 sudo systemctl status f2b-agent --no-pager
+```
+
+## Step 10 - Restart fail2ban fresh for immediat full log scan
+
+
+first remove previous runs to start fresh
+
+```bash
+# stop fail2ban
+sudo systemctl stop fail2ban
+
+# Remove fail2ban database
+sudo rm -f /var/lib/fail2ban/fail2ban.sqlite3
+
+# start fail2ban
+sudo systemctl start fail2ban
+
+# Watch logs
+sudo tail -f /var/log/fail2ban.log
 ```
