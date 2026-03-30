@@ -9,15 +9,19 @@
 
 ## Files
 
-| File                  | Destination                             | Purpose                    |
-| --------------------- | ----------------------------------------|----------------------------|
-| `agent.py`            | `/usr/local/bin/f2b-agent`              | Agent binary               |
-| `f2b-agent.conf`      | `/etc/f2b-agent.conf`                   | Agent configuration        |
-| `f2be.conf`           | `/etc/fail2ban/action.d/f2be.conf`      | Fail2Ban action definition |
-| `vicidial.conf`       | `/etc/fail2ban/jail.local`              | jail.local for ViciDial    |
-| `fusionpbx.conf`      | `/etc/fail2ban/jail.local`              | jail.local for FusionPBX   |
-| `debian.conf`         | `/etc/fail2ban/jail.local`              | jail.local for  Debian     |
-| `f2b-agent.service`   | `/etc/systemd/system/f2b-agent.service` | Systemd sync-loop daemon   |
+| File/Dir                          | Destination                                    | Purpose                          |
+| --------------------------------- | -----------------------------------------------|----------------------------------|
+| `agent.py`                        | `/usr/local/bin/f2b-agent`                     | Agent binary                     |
+| `f2b-agent.conf.example`          | `/etc/f2b-agent.conf`                          | Agent configuration (copy+edit)  |
+| `action.d/f2be.conf`              | `/etc/fail2ban/action.d/f2be.conf`             | Fail2Ban action (API notify)     |
+| `action.d/ipset.conf`             | `/etc/fail2ban/action.d/ipset.conf`            | Fail2Ban action (ipset update)   |
+| `jails/vicidial.conf`             | `/etc/fail2ban/jail.local`                     | jail.local for ViciDial          |
+| `jails/fusionpbx.conf`            | `/etc/fail2ban/jail.local`                     | jail.local for FusionPBX         |
+| `jails/debian.conf`               | `/etc/fail2ban/jail.local`                     | jail.local for Debian            |
+| `jails/default.conf`              | `/etc/fail2ban/jail.local`                     | Reference default (optional)     |
+| `system/f2b-agent.service`        | `/etc/systemd/system/f2b-agent.service`        | Systemd sync-loop daemon         |
+| `system/ipset-restore.service`    | `/etc/systemd/system/ipset-restore.service`    | Systemd ipset restore daemon     |
+| `system/iptables-restore.service` | `/etc/systemd/system/iptables-restore.service` | Systemd iptables restore daemon  |
 
 ---
 
@@ -25,9 +29,14 @@
 
 - **Fail2Ban writes bans to ipset**, not per‑IP `iptables` rules.
 - **iptables references small ipset sets** with a single rule per set, placed early in `INPUT`.
-- **Per‑jail ipset sets** are preferred (e.g., `f2b-ssh`, `f2b-sip`, `f2b-web`) for clarity.
+- **Per‑jail ipset sets** are preferred (e.g., `ssh`, `sip`, `web`) for clarity.
 - No unconditional early `ACCEPT all` rules; keep `RELATED,ESTABLISHED` first, then whitelist, then ipset‑based drops.
-- Visibility: `fail2ban-client status <jail>` shows bans; `ipset list f2b-<jail>` shows members.
+- Visibility: `fail2ban-client status <jail>` shows bans; `ipset list <set>` shows members.
+-
+- Agent scope:
+  - Agent never creates ipset sets and never alters iptables.
+  - You must create ipset sets and iptables rules manually (see baseline below).
+  - Agent distributes bans per jail into existing sets and reconciles membership only.
 
 ---
 
@@ -54,33 +63,130 @@ cd ~/Fail2BanEntreprise/agent
 
 ---
 
-## Step 2 — Install Fail2Ban and ipset
+## Step 2 — Install prerequisites (ipset, iptables, Fail2Ban)
 
 **ViciDial / ViciBox (openSUSE / SLES):**
 
 ```bash
-sudo zypper refresh && zypper install fail2ban ipset
+sudo zypper refresh && zypper install iptables ipset fail2ban
 ```
 
 **FusionPBX / Debian / Ubuntu:**
 
 ```bash
-sudo apt-get update && sudo apt-get install -y fail2ban ipset
+sudo apt-get update && sudo apt-get install -y iptables ipset fail2ban iptables-persistent ipset-persistent
 ```
 
-## Step 3 — Install the Agent
+## Step 3 — Baseline Firewall Ordering (iptables + ipset)
+
+### Create ipset sets
+
+```bash
+# Whitelist: never banned; referenced early as ACCEPT
+sudo ipset create whitelist hash:net -exist
+
+# Per-category blacklists (with timeouts where policy requires)
+sudo ipset create ssh   hash:ip -exist
+sudo ipset create sip   hash:ip -exist
+sudo ipset create db    hash:ip -exist
+sudo ipset create web   hash:ip -exist
+sudo ipset create proxy hash:ip -exist
+sudo ipset create email hash:ip -exist
+
+# Fallback blacklist
+sudo ipset create blacklist hash:ip -exist
+```
+
+Verify sets are created:
+
+```bash
+sudo ipset list -n
+```
+
+Immediately whitelist baseline IPs (including your current IP):
+
+```bash
+# Add baseline entries (CIDRs supported by whitelist hash:net)
+sudo ipset add whitelist 127.0.0.1 -exist
+sudo ipset add whitelist 196.179.222.182 -exist
+sudo ipset add whitelist 213.144.214.193/26 -exist
+sudo ipset add whitelist 81.95.124.1/26 -exist
+sudo ipset add whitelist 81.95.119.129/26 -exist
+sudo ipset add whitelist ${MYIP} -exist
+
+# Quick checks: membership and rule presence
+sudo ipset test whitelist ${MYIP} || true
+```
+
+Persist ipset across reboots:
+
+```bash
+sudo ipset save | sudo tee /etc/ipset.conf >/dev/null
+```
+
+Target order in `INPUT`:
+
+1. `ACCEPT` state `RELATED,ESTABLISHED`
+2. `ACCEPT` whitelist ipset (`whitelist`)
+3. `DROP` per‑category ipset sets (`ssh`, `sip`, `db`, `web`, `proxy`, `email`) and/or `blacklist`
+4. Service‑specific `ACCEPT`s (ssh/http/https/sip/rtp/vpn)
+5. Final policy `DROP` (or explicit)
+
+### Insert minimal, ordered iptables rules (idempotent)
+
+```bash
+# 1. Early stateful accept
+sudo iptables -C INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+# 2. Office/VPN/IP infra whitelist via ipset
+sudo iptables -C INPUT -m set --match-set whitelist src -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 2 -m set --match-set whitelist src -j ACCEPT
+
+# 3. Per-category drops (evaluate early)
+sudo iptables -C INPUT -m set --match-set ssh   src -j DROP 2>/dev/null || sudo iptables -I INPUT 3 -m set --match-set ssh   src -j DROP
+sudo iptables -C INPUT -m set --match-set sip   src -j DROP 2>/dev/null || sudo iptables -I INPUT 4 -m set --match-set sip   src -j DROP
+sudo iptables -C INPUT -m set --match-set db    src -j DROP 2>/dev/null || sudo iptables -I INPUT 5 -m set --match-set db    src -j DROP
+sudo iptables -C INPUT -m set --match-set web   src -j DROP 2>/dev/null || sudo iptables -I INPUT 6 -m set --match-set web   src -j DROP
+sudo iptables -C INPUT -m set --match-set proxy src -j DROP 2>/dev/null || sudo iptables -I INPUT 7 -m set --match-set proxy src -j DROP
+sudo iptables -C INPUT -m set --match-set email src -j DROP 2>/dev/null || sudo iptables -I INPUT 8 -m set --match-set email src -j DROP
+sudo iptables -C INPUT -m set --match-set blacklist src -j DROP 2>/dev/null || sudo iptables -I INPUT 9 -m set --match-set blacklist src -j DROP
+```
+
+Remove any unconditional early `ACCEPT all` rules. Keep only service‑specific accepts (e.g., `ssh`, `http/https`).
+
+### Persist firewall and ipset across reboots
+
+```bash
+# Save current rules
+sudo mkdir -p /etc/iptables
+sudo iptables-save | sudo tee /etc/iptables/rules.v4 >/dev/null
+sudo ipset save    | sudo tee /etc/ipset.conf        >/dev/null
+
+# Install restore units from repository (IPv4 + ipset)
+sudo cp system/iptables-restore.service /etc/systemd/system/iptables-restore.service
+sudo cp system/ipset-restore.service    /etc/systemd/system/ipset-restore.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable iptables-restore ipset-restore
+sudo systemctl start  iptables-restore ipset-restore
+
+# Verify
+sudo systemctl status iptables-restore --no-pager
+sudo systemctl status ipset-restore    --no-pager
+```
+
+## Step 4 — Install Fail2Ban Actions (ipset + f2be)
 
 ```bash
 # Copy agent binary
 sudo cp agent.py /usr/local/bin/f2b-agent
 sudo chmod +x /usr/local/bin/f2b-agent
-sudo cp f2b-agent.conf /etc/f2b-agent.conf
+sudo cp f2b-agent.conf.example /etc/f2b-agent.conf
 
 # Verify
 f2b-agent help
 ```
 
-## Step 4 — Register This Server in the Dashboard
+## Step 9 — Register This Server in the Dashboard
 
 1. Enter this server's hostname (e.g. `dialer1.callpro.be`)
 
@@ -105,27 +211,28 @@ f2b-agent help
 
 ---
 
-## Step 5 — Install Fail2Ban Action (ipset)
+## Step 5 — Install jail.local (per‑platform baseline)
 
 ```bash
-sudo cp f2be.conf /etc/fail2ban/action.d/f2be.conf
+sudo cp action.d/f2be.conf  /etc/fail2ban/action.d/f2be.conf
+sudo cp action.d/ipset.conf /etc/fail2ban/action.d/ipset.conf
 ```
 
 ---
 
-## Step 6 — Install jail.local (per‑platform baseline)
+## Step 6 — Enable and Reload Fail2Ban
 
 Choose the file that matches your platform:
 
 ```bash
 # ViciDial / ViciBox
-sudo cp vicidial.conf /etc/fail2ban/jail.local
+sudo cp jails/vicidial.conf /etc/fail2ban/jail.local
 
 # FusionPBX
-sudo cp fusionpbx.conf /etc/fail2ban/jail.local
+sudo cp jails/fusionpbx.conf /etc/fail2ban/jail.local
 
 # Generic Debian
-sudo cp debian.conf /etc/fail2ban/jail.local
+sudo cp jails/debian.conf /etc/fail2ban/jail.local
 ```
 
 > **⚠️ Before reloading:** Edit `jail.local` and verify the `ignoreip` line includes your office IP and VPN exit IP. Getting blocked by any jail locks out SSH + web + SIP simultaneously.
@@ -137,10 +244,26 @@ ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.193/26 81.95.124.1/26 81.
 
 ---
 
-## Step 7 — Install Systemd Service (agent sync)
+---
+
+## Step 7 — Install the Agent
 
 ```bash
-sudo cp f2b-agent.service /etc/systemd/system/f2b-agent.service
+# Copy agent binary
+sudo cp agent.py /usr/local/bin/f2b-agent
+sudo chmod +x /usr/local/bin/f2b-agent
+sudo cp f2b-agent.conf.example /etc/f2b-agent.conf
+
+# Verify
+f2b-agent help
+```
+
+---
+
+## Step 8 — Register This Server in the Dashboard
+
+```bash
+sudo cp system/f2b-agent.service /etc/systemd/system/f2b-agent.service
 sudo systemctl daemon-reload
 sudo systemctl enable f2b-agent
 sudo systemctl restart f2b-agent
@@ -149,7 +272,9 @@ sudo systemctl status f2b-agent --no-pager
 
 ---
 
-## Step 8 — Enable and Reload Fail2Ban
+---
+
+## Step 9 — Install Systemd Service (agent sync)
 
 ```bash
 sudo systemctl enable fail2ban
@@ -161,181 +286,3 @@ sudo fail2ban-client status
 # Verify agent is syncing
 sudo journalctl -u f2b-agent -f
 ```
-
----
-
-## Step 9 — Baseline Firewall Ordering (iptables + ipset)
-
-Target order in `INPUT`:
-
-1. `ACCEPT` state `RELATED,ESTABLISHED`
-2. `ACCEPT` whitelist ipset (e.g., `f2b-whitelist`)
-3. `DROP` per‑jail ipset sets (`f2b-ssh`, `f2b-sip`, and/or `f2b-global`)
-4. Service‑specific `ACCEPT`s (ssh/http/https/sip/rtp/vpn)
-5. Final policy `DROP` (or explicit)
-
-Example snippet to create sets and add match rules (idempotent on modern systems):
-
-```bash
-# Create sets if not exist (IPv4). Add "timeout <sec>" as policy where desired.
-sudo ipset create f2b-whitelist hash:ip -exist
-sudo ipset create f2b-ssh hash:ip timeout 3600 -exist
-sudo ipset create f2b-sip hash:ip timeout 3600 -exist
-sudo ipset create f2b-global hash:ip -exist
-
-# Insert early rules in INPUT (ensure RELATED,ESTABLISHED is first)
-sudo iptables -C INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null \
-  || sudo iptables -I INPUT 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
-
-sudo iptables -C INPUT -m set --match-set f2b-whitelist src -j ACCEPT 2>/dev/null \
-  || sudo iptables -I INPUT 2 -m set --match-set f2b-whitelist src -j ACCEPT
-
-sudo iptables -C INPUT -m set --match-set f2b-ssh src -j DROP 2>/dev/null \
-  || sudo iptables -I INPUT 3 -m set --match-set f2b-ssh src -j DROP
-
-sudo iptables -C INPUT -m set --match-set f2b-sip src -j DROP 2>/dev/null \
-  || sudo iptables -I INPUT 4 -m set --match-set f2b-sip src -j DROP
-
-# Optional global catch‑all blacklist after per‑jail sets
-sudo iptables -C INPUT -m set --match-set f2b-global src -j DROP 2>/dev/null \
-  || sudo iptables -I INPUT 5 -m set --match-set f2b-global src -j DROP
-```
-
-Remove any unconditional early `ACCEPT all` rules. Keep only service‑specific accepts (e.g., `ssh`, `http/https`).
-
----
-
-## Step 10 — Switch Jails to ipset Action (`f2be`)
-
-Ensure all relevant jails use the ipset action. In `/etc/fail2ban/jail.local`:
-
-```ini
-[DEFAULT]
-banaction = f2be
-
-[sshd]
-enabled  = true
-action   = f2be[name=sshd, setname=f2b-ssh]
-```
-
-Reload Fail2Ban:
-
-```bash
-sudo fail2ban-client reload
-sudo fail2ban-client status
-```
-
----
-
-## Step 11 — Clean Up Legacy Per‑IP Rules
-
-After confirming ipset bans are being enforced:
-
-```bash
-# Review large legacy chains first:
-sudo iptables -S | grep -E 'f2b-|sip-auth'
-sudo iptables -L INPUT -n --line-numbers
-
-# Remove/flush legacy per‑IP rules and duplicate SSH jails (example; adjust to your chains)
-# WARNING: Do this only after verifying ipset rules are active and early in INPUT.
-# Example to flush a legacy chain:
-# sudo iptables -F f2b-SSH
-# sudo iptables -X f2b-SSH
-```
-
-Keep chain count small and rely on ipset matches instead of hundreds of per‑IP `REJECT/DROP` rules.
-
----
-
-## Verify (end-to-end)
-
-```bash
-# Active jails
-sudo fail2ban-client status
-
-# Agent sync log
-sudo tail -f /var/log/f2b-agent.log
-
-# ipset contents (per-jail and/or global)
-sudo ipset list | sed -n '1,120p'
-sudo ipset list f2b-ssh | head -20
-sudo ipset list f2b-sip | head -20
-sudo ipset list f2b-global | head -20
-
-# iptables INPUT shows short, ordered rules with early ipset matches
-sudo iptables -S INPUT
-sudo iptables -L INPUT -n --line-numbers | sed -n '1,120p'
-```
-
----
-
-## Maintenance
-
-| Task | Command |
-| --- | --- |
-| Check a specific jail | `fail2ban-client status <jail>` |
-| Reload Fail2Ban config | `fail2ban-client reload` |
-| View blocked IPs | `ipset list f2b-<jail>` |
-| Manual ban | `fail2ban-client set <jail> banip <ip>` |
-| Unban locally | `fail2ban-client set <jail> unbanip <ip>` |
-| Unban globally | Dashboard → Bans tab → Unban |
-| Restart agent | `systemctl restart f2b-agent` |
-| View agent log | `tail -f /var/log/f2b-agent.log` |
-
----
-
-## Auth Model
-
-| Endpoint | Auth | Called by |
-| --- | --- | --- |
-| `POST /api/ban` | `x-api-key` (per-server token) | Agent on Fail2Ban ban event |
-| `GET /api/sync` | `x-api-key` (per-server token) | Agent sync-loop (every 60s) |
-| `POST /api/unban` | JWT cookie | Dashboard admin only |
-
-Ban expiry is handled by **Redis TTL** — agents do not need to call `/api/unban`.
-
----
-
-## Remediation Playbook (step‑by‑step to fix existing hosts)
-
-1) Baseline hygiene (from `linux/README.md`)
-- Harden SSH (keys only, disable root login).
-- Audit users and access; add office/VPN subnets to `ignoreip`.
-
-2) Standardize Fail2Ban actions
-- Install `f2be.conf` and set `banaction = f2be`.
-- Switch priority jails (`sshd`, `nginx-*`, `sip/asterisk/freeswitch`, `postfix`) to `f2be[name=<jail>, setname=f2b-<jail>]`.
-
-3) Create/confirm ipset sets
-- `f2b-whitelist` (no timeout), `f2b-ssh`/`f2b-sip` (with timeout), keep `f2b-global`.
-
-4) Fix firewall rule ordering
-- Ensure `RELATED,ESTABLISHED` first.
-- Add `ACCEPT -m set --match-set f2b-whitelist src`.
-- Add `DROP -m set --match-set f2b-ssh src`, `f2b-sip`, and/or `f2b-global` before service `ACCEPT`s.
-- Remove any unconditional early `ACCEPT all`.
-
-5) Clean up legacy rules
-- Flush per‑IP `REJECT/DROP` rules from Fail2Ban legacy chains once ipset path is confirmed working.
-- Remove duplicate/overlapping SSH jails (`f2b-SSH` vs `f2b-sshd`).
-
-6) Improve filters and test
-- Tighten high‑volume filters (SIP/HTTP) and validate with `fail2ban-regex` on platform‑correct logs (`file` on Debian, `systemd` on openSUSE).
-- Add IPv6 support where applicable.
-
-7) Verify and monitor
-- `fail2ban-client status` and `fail2ban-client status <jail>`.
-- `ipset list f2b-<jail>` shows members; `iptables -L INPUT -n` shows few, ordered rules.
-- Watch CPU and ban volumes; adjust thresholds if needed.
-
----
-
-## Host‑specific notes
-
-- Debian/FusionPBX:
-  - `backend = file` (e.g., `/var/log/auth.log`, Nginx logs).
-  - SIP protections (`freeswitch-ip`, `auth-challenge-ip`) should ban into `f2b-sip` via `f2be`.
-
-- ViciDial/openSUSE:
-  - `backend = systemd` for `sshd`/mail (dump logs with `journalctl` for regex testing).
-  - Align Apache filter filenames with `error_log` / `access_log`.

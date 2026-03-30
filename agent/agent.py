@@ -39,13 +39,16 @@ CONFIG_FILE = "/etc/f2b-agent.conf"
 LOG_FILE    = "/var/log/f2b-agent.log"
 
 DEFAULTS = {  # type: Dict[str, str]
-    "F2B_API_URL":       "",
+    "F2B_API_URL":             "https://f2b.scopcall.com",
     "F2B_API_KEY":       "",
     "F2B_SYNC_INTERVAL": "60",
-    "F2B_IPSET_NAME":    "f2b-global",
+    "F2B_IPSET_WHITELIST_NAME": "whitelist",
+    "F2B_IPSET_BLACKLIST_NAME": "blacklist",
+    "F2B_IPSET_SETS": "ssh,sip,db,web,proxy,email",
 }
 
-# ── Logging ─────────────────────────────────────────────────────────────────
+# ── Logging ───────────────────────────────────────────────────────────────
+
 
 def _setup_logging() -> logging.Logger:
     fmt = "[%(asctime)s] %(levelname)s %(message)s"
@@ -72,7 +75,8 @@ def _setup_logging() -> logging.Logger:
 
 log = _setup_logging()
 
-# ── Configuration ────────────────────────────────────────────────────────────
+# ── Configuration ──────────────────────────────────────────────────────────
+
 
 def _parse_conf(path: str) -> Dict[str, str]:
     """
@@ -113,9 +117,14 @@ def load_config() -> Dict[str, str]:
     return cfg
 
 
-# ── HTTP helpers ──────────────────────────────────────────────────────────────
+# ── HTTP helpers ──────────────────────────────────────────────────────────
 
-def _api_post(url: str, key: str, body: Dict, timeout: int = 10) -> Optional[int]:
+def _api_post(
+    url: str,
+    key: str,
+    body: Dict,
+    timeout: int = 10,
+) -> Optional[int]:
     """POST JSON to the API, return HTTP status code or None on error."""
     data = json.dumps(body).encode()
     req = urllib.request.Request(
@@ -124,9 +133,9 @@ def _api_post(url: str, key: str, body: Dict, timeout: int = 10) -> Optional[int
         method="POST",
         headers={
             "Content-Type": "application/json",
-            "x-api-key":    key,
-            "User-Agent":   "Fail2BanEntreprise-Agent/1.0",
-            "Accept":       "application/json",
+            "x-api-key": key,
+            "User-Agent": "Fail2BanEntreprise-Agent/1.0",
+            "Accept": "application/json",
         },
     )
     try:
@@ -135,19 +144,23 @@ def _api_post(url: str, key: str, body: Dict, timeout: int = 10) -> Optional[int
     except urllib.error.HTTPError as exc:
         log.debug("HTTP POST error: %s", exc)
         return exc.code
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         log.debug("HTTP POST error: %s", exc)
         return None
 
 
-def _api_get(url: str, key: str, timeout: int = 15) -> Optional[Dict]:
+def _api_get(
+    url: str,
+    key: str,
+    timeout: int = 15,
+) -> Optional[Dict]:
     """GET JSON from the API, return parsed dict or None on error."""
     req = urllib.request.Request(
         url,
         headers={
-            "x-api-key":  key,
+            "x-api-key": key,
             "User-Agent": "Fail2BanEntreprise-Agent/1.0",
-            "Accept":     "application/json",
+            "Accept": "application/json",
         },
     )
     try:
@@ -156,12 +169,12 @@ def _api_get(url: str, key: str, timeout: int = 15) -> Optional[Dict]:
     except urllib.error.HTTPError as exc:
         log.warning("HTTP GET failed for %s (status=%s)", url, exc.code)
         return None
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         log.debug("HTTP GET error: %s", exc)
         return None
 
 
-# ── ipset / iptables helpers ──────────────────────────────────────────────────
+# ── ipset helpers ──────────────────────────────
 
 def _run(*cmd: str, check: bool = False) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -179,36 +192,76 @@ def _ipset(*args: str) -> bool:
     return result.returncode == 0
 
 
-def _iptables_rule_exists(ipset_name: str) -> bool:
-    r = _run("iptables", "-C", "INPUT", "-m", "set",
-             "--match-set", ipset_name, "src", "-j", "DROP")
-    return r.returncode == 0
+def _ipset_sets() -> List[str]:
+    """Return list of existing ipset set names."""
+    proc = _run("ipset", "list", "-n")
+    if proc.returncode != 0:
+        return []
+    return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
 
 
-def _iptables_add_rule(ipset_name: str) -> None:
-    _run("iptables", "-I", "INPUT", "-m", "set",
-         "--match-set", ipset_name, "src", "-j", "DROP", check=True)
-    log.info("Added iptables DROP rule for ipset %s", ipset_name)
+def _ipset_members(set_name: str) -> List[str]:
+    """Return members of an ipset set (IPs or CIDRs depending on type)."""
+    proc = _run("ipset", "list", set_name)
+    if proc.returncode != 0:
+        return []
+    out = proc.stdout
+    if "Members:" not in out:
+        return []
+    members_block = out.split("Members:", 1)[1]
+    return [
+        line.strip()
+        for line in members_block.splitlines()
+        if line.strip()
+    ]
 
 
-def _ensure_ipset(name: str) -> None:
-    """Create hash:net ipset if it doesn't exist (supports IPs and CIDRs)."""
-    _ipset("create", name, "hash:net", "-exist")
+def _ipset_exists(name: str) -> bool:
+    """Return True if an ipset set exists."""
+    return name in _ipset_sets()
 
 
-# ── CIDR helper ───────────────────────────────────────────────────────────────
+def _parse_sets_cfg(cfg_value: str) -> List[str]:
+    """Parse a comma-separated list of ipset names into a clean list."""
+    return [s.strip() for s in cfg_value.split(",") if s.strip()]
+
+
+def _allowed_target_sets(cfg: Dict[str, str]) -> List[str]:
+    """
+    Return the list of allowed target ipset names to populate with bans.
+    Includes configured per-jail sets plus the configured blacklist
+    as the fallback.
+    """
+    per_jail = _parse_sets_cfg(cfg.get("F2B_IPSET_SETS", ""))
+    bl = cfg.get("F2B_IPSET_BLACKLIST_NAME", "blacklist")
+    # Maintain deterministic ordering; ensure blacklist is present once
+    ordered = [s for s in per_jail if s]
+    if bl not in ordered:
+        ordered.append(bl)
+    return ordered
+
+
+# ── CIDR helper ───────────────────────────────────────────────────────────
 
 def ip_in_entry(ip: str, entry: str) -> bool:
     """Return True if ip (string) falls within entry (IP or CIDR string)."""
     try:
-        return ipaddress.ip_address(ip) in ipaddress.ip_network(entry, strict=False)
+        return ipaddress.ip_address(ip) in ipaddress.ip_network(
+            entry,
+            strict=False,
+        )
     except ValueError:
         return False
 
 
-# ── Actions ───────────────────────────────────────────────────────────────────
+# ── Actions ────────────────────────────────────────────────────────────────
 
-def action_ban(cfg: Dict[str, str], ip: str, jail: str, bantime: int = 86400) -> None:
+def action_ban(
+    cfg: Dict[str, str],
+    ip: str,
+    jail: str,
+    bantime: int = 86400,
+) -> None:
     log.info("BAN ip=%s jail=%s bantime=%d", ip, jail, bantime)
 
     code = _api_post(
@@ -232,7 +285,10 @@ def action_notify_unban(ip: str, jail: str = "unknown") -> None:
     This function only logs the local event.
     """
     log.info(
-        "UNBAN-LOCAL ip=%s jail=%s (Fail2Ban expired; Redis TTL handles central expiry)",
+        (
+            "UNBAN-LOCAL ip=%s jail=%s "
+            "(Fail2Ban expired; Redis TTL handles central expiry)"
+        ),
         ip, jail,
     )
 
@@ -240,17 +296,15 @@ def action_notify_unban(ip: str, jail: str = "unknown") -> None:
 def action_sync(cfg: Dict[str, str]) -> None:
     log.info("SYNC start")
 
-    ipset_name = cfg["F2B_IPSET_NAME"]
-
-    # Ensure ipset exists (hash:net supports both IPs and CIDRs)
-    _ensure_ipset(ipset_name)
-
-    # Ensure iptables rule exists
-    if not _iptables_rule_exists(ipset_name):
-        _iptables_add_rule(ipset_name)
+    blacklist_set = cfg.get("F2B_IPSET_BLACKLIST_NAME", "blacklist")
+    category_sets = _parse_sets_cfg(cfg.get("F2B_IPSET_SETS", ""))
+    target_sets = _allowed_target_sets(cfg)
 
     # Fetch global state
-    data = _api_get("{}/api/sync".format(cfg["F2B_API_URL"]), cfg["F2B_API_KEY"])
+    data = _api_get(
+        "{}/api/sync".format(cfg["F2B_API_URL"]),
+        cfg["F2B_API_KEY"],
+    )
     if data is None:
         log.warning("SYNC failed - API request rejected or unreachable")
         return
@@ -258,29 +312,59 @@ def action_sync(cfg: Dict[str, str]) -> None:
     bans = data.get("bans", [])  # type: List[Dict]
     whitelist = data.get("whitelist", [])  # type: List[str]
 
-    # Build new ipset atomically via a temp set
-    tmp_name = "{}-tmp".format(ipset_name)
-    _ensure_ipset(tmp_name)
-    _ipset("flush", tmp_name)
+    # Build desired membership per target set
+    desired_by_set = {s: set() for s in target_sets}  # type: Dict[str, set]
 
-    count = 0
+    # Distribute bans into per-jail sets; fallback to blacklist if no match
     for ban in bans:
         ip = ban.get("ip", "")
         if not ip:
             continue
+        jail = str(ban.get("jail", "") or "").lower()
 
         # Skip if the IP falls within any whitelisted entry (IP or CIDR)
         if any(ip_in_entry(ip, wl) for wl in whitelist):
             continue
 
-        if _ipset("add", tmp_name, ip, "-exist"):
-            count += 1
+        # Choose target set by jail/category when available, else blacklist
+        if jail in category_sets:
+            target = jail
+        else:
+            target = blacklist_set
 
-    # Atomic swap then destroy temp
-    _ipset("swap", tmp_name, ipset_name)
-    _ipset("destroy", tmp_name)
+        if target not in desired_by_set:
+            # Config changed mid-run; skip unknown set
+            continue
 
-    log.info("SYNC done: %d IPs in %s", count, ipset_name)
+        desired_by_set[target].add(ip)
+
+    # Reconcile memberships for existing sets only
+    results = []  # type: List[str]
+    existing_sets = set(_ipset_sets())
+    for set_name, desired in desired_by_set.items():
+        if set_name not in existing_sets:
+            log.warning(
+                "ipset %s not found - skipping (managed manually)",
+                set_name,
+            )
+            continue
+        current = set(_ipset_members(set_name))
+        to_add = sorted(desired - current)
+        to_del = sorted(current - desired)
+        adds = 0
+        dels = 0
+        for ip in to_add:
+            if _ipset("add", set_name, ip, "-exist"):
+                adds += 1
+        for ip in to_del:
+            # Best-effort delete; ignore failures
+            _ipset("del", set_name, ip)
+            dels += 1
+        results.append("{}:+{} -{}".format(set_name, adds, dels))
+
+    # Log summary
+    summary = ", ".join(results) if results else "no sets updated"
+    log.info("SYNC done: %s", summary)
 
 
 def action_sync_loop(cfg: Dict[str, str]) -> None:
@@ -294,23 +378,36 @@ def action_sync_loop(cfg: Dict[str, str]) -> None:
         time.sleep(interval)
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry point ───────────────────────────────────────────────────────────
 
 USAGE = """\
 Fail2BanEntreprise Agent
 
 Usage:
-  f2b-agent ban  <ip> <jail> [bantime]   Report ban to central API
-  f2b-agent unban <ip> [jail]            Log locally (Redis TTL handles expiry)
-  f2b-agent sync                         Pull global state -> local ipset (once)
-  f2b-agent sync-loop                    Pull global state -> local ipset (loop)
+  f2b-agent ban  <ip> <jail> [bantime]
+      Report ban to central API
+  f2b-agent unban <ip> [jail]
+      Log locally (Redis TTL handles expiry)
+  f2b-agent sync
+      Pull global state -> local ipset (once)
+  f2b-agent sync-loop
+      Pull global state -> local ipset (loop)
   f2b-agent help                         Show this help
 
+Notes:
+  - Agent never creates ipset sets and never alters iptables.
+    Create ipset sets, iptables rules, and Fail2Ban configs manually
+    as described in README before enabling sync.
+
 Configuration  ->  /etc/f2b-agent.conf:
-  F2B_API_URL       Dashboard URL  (required)
-  F2B_API_KEY       Per-server token from dashboard -> Servers page (required)
-  F2B_SYNC_INTERVAL Seconds between syncs (default: 60)
-  F2B_IPSET_NAME    ipset name (default: f2b-global, type: hash:net)
+  F2B_API_URL                 Dashboard URL  (required)
+  F2B_API_KEY                 Per-server token (required)
+  F2B_SYNC_INTERVAL           Seconds between syncs (default: 60)
+  F2B_IPSET_WHITELIST_NAME    Whitelist set (default: whitelist,
+                              type: hash:net)
+  F2B_IPSET_BLACKLIST_NAME    Blacklist set (default: blacklist, type: hash:ip)
+  F2B_IPSET_SETS              Comma list of per-jail sets
+                              (default: ssh,sip,db,web,proxy,email)
 
 Auth model:
   /api/ban   -> x-api-key (per-server token)
@@ -321,7 +418,7 @@ Auth model:
 
 def main() -> None:
     args = sys.argv[1:]
-    cmd  = args[0] if args else "help"
+    cmd = args[0] if args else "help"
 
     # Show help without requiring config
     if cmd in ("help", "--help", "-h"):
@@ -342,8 +439,8 @@ def main() -> None:
         if len(args) < 3:
             log.error("Usage: agent.py ban <ip> <jail> [bantime]")
             sys.exit(1)
-        ip    = args[1]
-        jail  = args[2]
+        ip = args[1]
+        jail = args[2]
         btime = int(args[3]) if len(args) > 3 else 86400
         action_ban(cfg, ip, jail, btime)
 
@@ -351,7 +448,7 @@ def main() -> None:
         if len(args) < 2:
             log.error("Usage: agent.py unban <ip> [jail]")
             sys.exit(1)
-        ip   = args[1]
+        ip = args[1]
         jail = args[2] if len(args) > 2 else "unknown"
         action_notify_unban(ip, jail)
 

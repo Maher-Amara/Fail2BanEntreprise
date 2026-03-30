@@ -1,5 +1,5 @@
 [Unit]
-Description=Fail2BanEntreprise Agent — Global ban sync
+Description=Fail2BanEntreprise Agent — Ban sync
 Documentation=https://f2b.scopcall.com/servers
 After=network-online.target fail2ban.service
 Wants=network-online.target fail2ban.service

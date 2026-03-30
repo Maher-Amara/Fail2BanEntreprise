@@ -17,5 +17,15 @@ F2B_API_KEY="your-per-server-token-here"
 # Sync interval in seconds
 F2B_SYNC_INTERVAL=60
 
-# ipset name for the global ban list (hash:net — supports IPs and CIDRs)
-F2B_IPSET_NAME="f2b-global"
+# Ensure sets and rules are created ,before enabling the agent service.
+#
+# Whitelist (hash:net) — IPs/CIDRs here are skipped from all target sets
+F2B_IPSET_WHITELIST_NAME="whitelist"
+
+# Comma-separated per-jail/category sets to maintain (hash:ip):
+# Bans with jail=<name> go into that set; otherwise into blacklist.
+F2B_IPSET_SETS="ssh,sip,db,web,proxy,email"
+
+# Blacklist (hash:ip) — fallback target when a ban has no matching jail category
+F2B_IPSET_BLACKLIST_NAME="blacklist"
+
