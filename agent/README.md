@@ -111,7 +111,7 @@ Immediately whitelist baseline IPs (including your current IP):
 sudo ipset add whitelist 127.0.0.1 -exist
 sudo ipset add whitelist 196.179.222.182 -exist
 sudo ipset add whitelist 213.144.214.192/26 -exist
-sudo ipset add whitelist 81.95.124.0/26 -exist
+sudo ipset add whitelist 81.95.124.1/26 -exist
 sudo ipset add whitelist 81.95.119.128/26 -exist
 sudo ipset add whitelist ${MYIP} -exist
 
@@ -150,6 +150,28 @@ sudo iptables -C INPUT -m set --match-set blacklist src -j DROP 2>/dev/null || s
 Remove any unconditional early `ACCEPT all` rules. Keep only service‑specific accepts (e.g., `ssh`, `http/https`).
 
 ### Persist firewall and ipset across reboots
+
+#### debian
+
+```bash
+sudo netfilter-persistent save
+sudo systemctl enable netfilter-persistent
+sudo systemctl start netfilter-persistent
+sudo systemctl status netfilter-persistent --no-pager
+
+sudo ipset save    | sudo tee /etc/ipset.conf        >/dev/null
+sudo cp system/ipset-restore.service    /etc/systemd/system/ipset-restore.service
+
+sudo systemctl daemon-reload
+sudo systemctl enable ipset-restore
+sudo systemctl start  ipset-restore
+
+# Verify
+sudo systemctl status ipset-restore    --no-pager
+
+```
+
+#### openSuse:
 
 ```bash
 # Save current rules
@@ -203,6 +225,7 @@ ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.0/26 81.
 ```bash
 sudo systemctl enable fail2ban
 sudo systemctl restart fail2ban
+sudo systemctl status fail2ban --no-pager
 
 # Verify jails are active
 sudo fail2ban-client status
