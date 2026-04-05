@@ -9,19 +9,19 @@
 
 ## Files
 
-| File/Dir                          | Destination                                    | Purpose                          |
-| --------------------------------- | -----------------------------------------------|----------------------------------|
-| `agent.py`                        | `/usr/local/bin/f2b-agent`                     | Agent binary                     |
-| `f2b-agent.conf.example`          | `/etc/f2b-agent.conf`                          | Agent configuration (copy+edit)  |
-| `action.d/f2be.conf`              | `/etc/fail2ban/action.d/f2be.conf`             | Fail2Ban action (API notify)     |
-| `action.d/ipset.conf`             | `/etc/fail2ban/action.d/ipset.conf`            | Fail2Ban action (ipset update)   |
-| `jails/vicidial.conf`             | `/etc/fail2ban/jail.local`                     | jail.local for ViciDial          |
-| `jails/fusionpbx.conf`            | `/etc/fail2ban/jail.local`                     | jail.local for FusionPBX         |
-| `jails/debian.conf`               | `/etc/fail2ban/jail.local`                     | jail.local for Debian            |
-| `jails/default.conf`              | `/etc/fail2ban/jail.local`                     | Reference default (optional)     |
-| `system/f2b-agent.service`        | `/etc/systemd/system/f2b-agent.service`        | Systemd sync-loop daemon         |
-| `system/ipset-restore.service`    | `/etc/systemd/system/ipset-restore.service`    | Systemd ipset restore daemon     |
-| `system/iptables-restore.service` | `/etc/systemd/system/iptables-restore.service` | Systemd iptables restore daemon  |
+| File/Dir                          | Destination                                    | Purpose                         |
+| --------------------------------- | ---------------------------------------------- | ------------------------------- |
+| `agent.py`                        | `/usr/local/bin/f2b-agent`                     | Agent binary                    |
+| `f2b-agent.conf.example`          | `/etc/f2b-agent.conf`                          | Agent configuration (copy+edit) |
+| `action.d/f2be.conf`              | `/etc/fail2ban/action.d/f2be.conf`             | Fail2Ban action (API notify)    |
+| `action.d/ipset.conf`             | `/etc/fail2ban/action.d/ipset.conf`            | Fail2Ban action (ipset update)  |
+| `jails/vicidial.conf`             | `/etc/fail2ban/jail.local`                     | jail.local for ViciDial         |
+| `jails/fusionpbx.conf`            | `/etc/fail2ban/jail.local`                     | jail.local for FusionPBX        |
+| `jails/debian.conf`               | `/etc/fail2ban/jail.local`                     | jail.local for Debian           |
+| `jails/default.conf`              | `/etc/fail2ban/jail.local`                     | Reference default (optional)    |
+| `system/f2b-agent.service`        | `/etc/systemd/system/f2b-agent.service`        | Systemd sync-loop daemon        |
+| `system/ipset-restore.service`    | `/etc/systemd/system/ipset-restore.service`    | Systemd ipset restore daemon    |
+| `system/iptables-restore.service` | `/etc/systemd/system/iptables-restore.service` | Systemd iptables restore daemon |
 
 ---
 
@@ -42,17 +42,17 @@
 
 ## 0) Server Inventory
 
-| IP Address         | Role       | OS            | Hostname   | Domain                | F2BE | Reason      |
-|--------------------|------------|---------------|------------|-----------------------|------|-------------|
-| 81.95.119.130      | FusionPBX  | Debian 9      | pbx130     | pbx130.stcall.be      | yes  | SSH acess   |
-| 81.95.119.153      | FusionPBX  | Debian 9      | pbx153     | pbx153.stcall.be      | no   | FA Fierwall |
-| 213.144.214.200    | FusionPBX  | Debian 12     | pbx200     | pbx200.scopcall.eu    | yes  |             |
-| 213.144.214.244    | FusionPBX  | Debian 12     | pbx244     | pbx244.scopcall.eu    | yes  |             |
-| 81.95.124.53       | ViciBox 10 | openSUSE      | crm53      | crm53.stcall.be       | no   | Old OS      |
-| 213.144.214.231    | ViciBox 12 | openSUSE 15.6 | crm231     | crm231.scopcall.eu    | yes  |             |
-| 213.144.214.241    | Vicidial 9 | openSUSE 15   | crm241     | crm241.scopcall.eu    | no   | Old OS      |
-| 213.144.214.243    | Vicidial 9 | openSUSE 15   | crm243     | crm243.scopcall.eu    |      |             |
-| 213.144.214.252    | Docker     | Debian        | docker252  | docker252.scopcall.eu |      |             |
+| IP Address      | Role       | OS            | Hostname  | Domain                | F2BE | Reason      |
+| --------------- | ---------- | ------------- | --------- | --------------------- | ---- | ----------- |
+| 81.95.119.130   | FusionPBX  | Debian 9      | pbx130    | pbx130.stcall.be      | yes  | SSH acess   |
+| 81.95.119.153   | FusionPBX  | Debian 9      | pbx153    | pbx153.stcall.be      | no   | FA Fierwall |
+| 213.144.214.200 | FusionPBX  | Debian 12     | pbx200    | pbx200.scopcall.eu    | yes  |             |
+| 213.144.214.244 | FusionPBX  | Debian 12     | pbx244    | pbx244.scopcall.eu    | yes  |             |
+| 81.95.124.53    | ViciBox 10 | openSUSE      | crm53     | crm53.stcall.be       | no   | Old OS      |
+| 213.144.214.231 | ViciBox 12 | openSUSE 15.6 | crm231    | crm231.scopcall.eu    | yes  |             |
+| 213.144.214.241 | Vicidial 9 | openSUSE 15   | crm241    | crm241.scopcall.eu    | no   | Old OS      |
+| 213.144.214.243 | Vicidial 9 | openSUSE 15   | crm243    | crm243.scopcall.eu    |      |             |
+| 213.144.214.252 | Docker     | Debian        | docker252 | docker252.scopcall.eu |      |             |
 
 ## Step 1 — Clone the Repository in Home Directory
 
@@ -66,16 +66,17 @@ cd ~/Fail2BanEntreprise/agent
 
 ## Step 2 — Install prerequisites (ipset, iptables, Fail2Ban)
 
-**ViciDial / ViciBox (openSUSE / SLES):**
+### ViciDial / ViciBox (openSUSE / SLES):**
 
 ```bash
 sudo zypper refresh && zypper install iptables ipset fail2ban
 ```
 
-**FusionPBX / Debian / Ubuntu:**
+### FusionPBX / Debian / Ubuntu:**
 
 ```bash
-sudo apt-get update && sudo apt-get install -y iptables ipset fail2ban iptables-persistent ipset-persistent
+sudo apt update && sudo apt upgrade -y
+sudo apt install -y iptables ipset fail2ban iptables-persistent ipset-persistent
 ```
 
 ## Step 3 — Baseline Firewall Ordering (iptables + ipset)
@@ -119,7 +120,6 @@ sudo ipset add whitelist ${MYIP} -exist
 sudo ipset test whitelist ${MYIP} || true
 ```
 
-
 ### Insert minimal, ordered iptables rules (idempotent)
 
 Target order in `INPUT`:
@@ -131,13 +131,27 @@ Target order in `INPUT`:
 5. Final policy `DROP` (or explicit)
 
 ```bash
-# 1. Early stateful accept
+# 1. Set everything to ALLOW (CRITICAL STEP)
+sudo iptables -P INPUT ACCEPT
+sudo iptables -P FORWARD ACCEPT
+sudo iptables -P OUTPUT ACCEPT
+
+# 2. Now it's safe to flush everything
+sudo iptables -F
+sudo iptables -X
+sudo iptables -t nat -F
+sudo iptables -t nat -X
+sudo iptables -t mangle -F
+sudo iptables -t mangle -X
+
+
+# 2. Early stateful accept
 sudo iptables -C INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-# 2. Office/VPN/IP infra whitelist via ipset
+# 3. Office/VPN/IP infra whitelist via ipset
 sudo iptables -C INPUT -m set --match-set whitelist src -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 2 -m set --match-set whitelist src -j ACCEPT
 
-# 3. Per-category drops (evaluate early)
+# 4. Per-category drops (evaluate early)
 sudo iptables -C INPUT -m set --match-set ssh   src -j DROP 2>/dev/null || sudo iptables -I INPUT 3 -m set --match-set ssh   src -j DROP
 sudo iptables -C INPUT -m set --match-set sip   src -j DROP 2>/dev/null || sudo iptables -I INPUT 4 -m set --match-set sip   src -j DROP
 sudo iptables -C INPUT -m set --match-set db    src -j DROP 2>/dev/null || sudo iptables -I INPUT 5 -m set --match-set db    src -j DROP
@@ -167,11 +181,11 @@ sudo systemctl enable ipset-restore
 sudo systemctl start  ipset-restore
 
 # Verify
-sudo systemctl status ipset-restore    --no-pager
+sudo systemctl status ipset-restore --no-pager
 
 ```
 
-#### openSuse:
+#### openSuse
 
 ```bash
 # Save current rules
@@ -266,8 +280,7 @@ f2b-agent help
     F2B_API_KEY="your-server-token-here"
     ```
 
-
-##  Step 9 — Install agent systemd service
+## Step 9 — Install agent systemd service
 
 ```bash
 sudo cp system/f2b-agent.service /etc/systemd/system/f2b-agent.service
@@ -278,7 +291,6 @@ sudo systemctl status f2b-agent --no-pager
 ```
 
 ## Step 10 - Restart fail2ban fresh for immediat full log scan
-
 
 first remove previous runs to start fresh
 
