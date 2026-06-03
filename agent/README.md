@@ -17,7 +17,8 @@
 | `action.d/ipset.conf`             | `/etc/fail2ban/action.d/ipset.conf`            | Fail2Ban action (ipset update)  |
 | `jails/vicidial.conf`             | `/etc/fail2ban/jail.local`                     | jail.local for ViciDial         |
 | `jails/fusionpbx.conf`            | `/etc/fail2ban/jail.local`                     | jail.local for FusionPBX        |
-| `jails/debian.conf`               | `/etc/fail2ban/jail.local`                     | jail.local for Debian           |
+| `jails/debian.conf`               | `/etc/fail2ban/jail.local`                     | jail.local for Debian <= 11     |
+| `jails/debian12.conf`             | `/etc/fail2ban/jail.local`                     | jail.local for Debian 12 / 13   |
 | `jails/default.conf`              | `/etc/fail2ban/jail.local`                     | Reference default (optional)    |
 | `system/f2b-agent.service`        | `/etc/systemd/system/f2b-agent.service`        | Systemd sync-loop daemon        |
 | `system/ipset-restore.service`    | `/etc/systemd/system/ipset-restore.service`    | Systemd ipset restore daemon    |
@@ -30,7 +31,7 @@
 - **Fail2Ban writes bans to ipset**, not per‑IP `iptables` rules.
 - **iptables references small ipset sets** with a single rule per set, placed early in `INPUT`.
 - **Per‑jail ipset sets** are preferred (e.g., `ssh`, `sip`, `web`) for clarity.
-- No unconditional early `ACCEPT all` rules; keep `RELATED,ESTABLISHED` first, then whitelist, then ipset‑based drops.
+- No unconditional early `ACCEPT all` rules; keep `RELATED,ESTABLISHED` first, loopback `lo` accept, whitelist, then ipset‑based drops, then specific port accepts, and default policy is DROP.
 - Visibility: `fail2ban-client status <jail>` shows bans; `ipset list <set>` shows members.
 -
 - Agent scope:
@@ -42,23 +43,29 @@
 
 ## 0) Server Inventory
 
-| IP Address      | Role       | OS            | Hostname  | Domain                | F2BE | Reason      |
-| --------------- | ---------- | ------------- | --------- | --------------------- | ---- | ----------- |
-| 81.95.119.130   | FusionPBX  | Debian 9      | pbx130    | pbx130.stcall.be      | yes  | SSH acess   |
-| 81.95.119.153   | FusionPBX  | Debian 9      | pbx153    | pbx153.stcall.be      | no   | FA Fierwall |
-| 213.144.214.200 | FusionPBX  | Debian 12     | pbx200    | pbx200.scopcall.eu    | yes  |             |
-| 213.144.214.244 | FusionPBX  | Debian 12     | pbx244    | pbx244.scopcall.eu    | yes  |             |
-| 81.95.124.53    | ViciBox 10 | openSUSE      | crm53     | crm53.stcall.be       | no   | Old OS      |
-| 213.144.214.231 | ViciBox 12 | openSUSE 15.6 | crm231    | crm231.scopcall.eu    | yes  |             |
-| 213.144.214.241 | Vicidial 9 | openSUSE 15   | crm241    | crm241.scopcall.eu    | no   | Old OS      |
-| 213.144.214.243 | Vicidial 9 | openSUSE 15   | crm243    | crm243.scopcall.eu    |      |             |
-| 213.144.214.252 | Docker     | Debian        | docker252 | docker252.scopcall.eu |      |             |
+| IP Address      | Role       | OS            | Hostname     | Domain                   | F2BE | Reason      |
+| --------------- | ---------- | ------------- | ------------ | ------------------------ | ---- | ----------- |
+| 81.95.119.130   | FusionPBX  | Debian 9      | pbx130       | pbx130.stcall.be         | yes  | SSH acess   |
+| 81.95.119.153   | FusionPBX  | Debian 9      | pbx153       | pbx153.stcall.be         | no   | FA Fierwall |
+| 213.144.214.200 | FusionPBX  | Debian 12     | pbx200       | pbx200.scopcall.eu       | yes  |             |
+| 213.144.214.244 | FusionPBX  | Debian 12     | pbx244       | pbx244.scopcall.eu       | yes  |             |
+| 81.95.124.53    | ViciBox 10 | openSUSE      | crm53        | crm53.stcall.be          | no   | Old OS      |
+| 213.144.214.231 | ViciBox 12 | openSUSE 15.6 | crm231       | crm231.scopcall.eu       | yes  |             |
+| 213.144.214.241 | Vicidial 9 | openSUSE 15   | crm241       | crm241.scopcall.eu       | no   | Old OS      |
+| 213.144.214.243 | Vicidial 9 | openSUSE 15   | crm243       | crm243.scopcall.eu       |      |             |
+| 213.144.214.252 | Docker     | Debian        | docker252    | docker252.scopcall.eu    |      |             |
+| 162.19.231.240  | Docker     | Debian        | vps-7623759c | vps-7623759c.vps.ovh.net | yes  |             |
 
 ## Step 1 — Clone the Repository in Home Directory
 
 ```bash
 cd ~
 git clone https://github.com/Maher-Amara/Fail2BanEntreprise.git
+
+# or
+cd Fail2BanEntreprise
+git pull
+
 cd ~/Fail2BanEntreprise/agent
 ```
 
@@ -120,23 +127,24 @@ sudo ipset add whitelist ${MYIP} -exist
 sudo ipset test whitelist ${MYIP} || true
 ```
 
-### Insert minimal, ordered iptables rules (idempotent)
+### Insert minimal, ordered iptables rules
 
 Target order in `INPUT`:
 
 1. `ACCEPT` state `RELATED,ESTABLISHED`
-2. `ACCEPT` whitelist ipset (`whitelist`)
-3. `DROP` per‑category ipset sets (`ssh`, `sip`, `db`, `web`, `proxy`, `email`) and/or `blacklist`
-4. Service‑specific `ACCEPT`s (ssh/http/https/sip/rtp/vpn)
-5. Final policy `DROP` (or explicit)
+2. `ACCEPT` loopback interface (`lo`)
+3. `ACCEPT` whitelist ipset (`whitelist`)
+4. `DROP` per‑category ipset sets (`ssh`, `sip`, `db`, `web`, `proxy`, `email`) and/or `blacklist`
+5. Specific `ACCEPT`s (ssh/http/https/quic/sip/rtp/vpn/other ports)
+6. Final policy `DROP`
 
 ```bash
-# 1. Set everything to ALLOW (CRITICAL STEP)
+# 1. Update policy to ALLOW by default (to prevent lockouts while configuring)
 sudo iptables -P INPUT ACCEPT
 sudo iptables -P FORWARD ACCEPT
 sudo iptables -P OUTPUT ACCEPT
 
-# 2. Now it's safe to flush everything
+# 2. Flush existing rules to start with a clean slate
 sudo iptables -F
 sudo iptables -X
 sudo iptables -t nat -F
@@ -144,24 +152,35 @@ sudo iptables -t nat -X
 sudo iptables -t mangle -F
 sudo iptables -t mangle -X
 
+# 3. Early stateful accept
+sudo iptables -A INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-# 2. Early stateful accept
-sudo iptables -C INPUT -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 1 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+# 4. Accept loopback traffic
+sudo iptables -A INPUT -i lo -j ACCEPT
 
-# 3. Office/VPN/IP infra whitelist via ipset
-sudo iptables -C INPUT -m set --match-set whitelist src -j ACCEPT 2>/dev/null || sudo iptables -I INPUT 2 -m set --match-set whitelist src -j ACCEPT
+# 5. Office/VPN/IP infra whitelist via ipset
+sudo iptables -A INPUT -m set --match-set whitelist src -j ACCEPT
 
-# 4. Per-category drops (evaluate early)
-sudo iptables -C INPUT -m set --match-set ssh   src -j DROP 2>/dev/null || sudo iptables -I INPUT 3 -m set --match-set ssh   src -j DROP
-sudo iptables -C INPUT -m set --match-set sip   src -j DROP 2>/dev/null || sudo iptables -I INPUT 4 -m set --match-set sip   src -j DROP
-sudo iptables -C INPUT -m set --match-set db    src -j DROP 2>/dev/null || sudo iptables -I INPUT 5 -m set --match-set db    src -j DROP
-sudo iptables -C INPUT -m set --match-set web   src -j DROP 2>/dev/null || sudo iptables -I INPUT 6 -m set --match-set web   src -j DROP
-sudo iptables -C INPUT -m set --match-set proxy src -j DROP 2>/dev/null || sudo iptables -I INPUT 7 -m set --match-set proxy src -j DROP
-sudo iptables -C INPUT -m set --match-set email src -j DROP 2>/dev/null || sudo iptables -I INPUT 8 -m set --match-set email src -j DROP
-sudo iptables -C INPUT -m set --match-set blacklist src -j DROP 2>/dev/null || sudo iptables -I INPUT 9 -m set --match-set blacklist src -j DROP
+# 6. Per-category drops (evaluate early)
+sudo iptables -A INPUT -m set --match-set ssh   src -j DROP
+sudo iptables -A INPUT -m set --match-set sip   src -j DROP
+sudo iptables -A INPUT -m set --match-set db    src -j DROP
+sudo iptables -A INPUT -m set --match-set web   src -j DROP
+sudo iptables -A INPUT -m set --match-set proxy src -j DROP
+sudo iptables -A INPUT -m set --match-set email src -j DROP
+sudo iptables -A INPUT -m set --match-set blacklist src -j DROP
+
+# 7. Specific services/ports
+sudo iptables -A INPUT -p tcp --dport 22 -j ACCEPT      # SSH
+sudo iptables -A INPUT -p tcp --dport 80 -j ACCEPT      # HTTP
+sudo iptables -A INPUT -p tcp --dport 443 -j ACCEPT     # HTTPS
+sudo iptables -A INPUT -p udp --dport 443 -j ACCEPT     # HTTP/3 (QUIC)
+
+# 8. Change default policy finally to block (DROP)
+sudo iptables -P INPUT DROP
+sudo iptables -P FORWARD DROP
+sudo iptables -P OUTPUT ACCEPT
 ```
-
-Remove any unconditional early `ACCEPT all` rules. Keep only service‑specific accepts (e.g., `ssh`, `http/https`).
 
 ### Persist firewall and ipset across reboots
 
@@ -174,7 +193,7 @@ sudo systemctl start netfilter-persistent
 sudo systemctl status netfilter-persistent --no-pager
 
 sudo ipset save    | sudo tee /etc/ipset.conf        >/dev/null
-sudo cp system/ipset-restore.service    /etc/systemd/system/ipset-restore.service
+sudo cp ~/Fail2BanEntreprise/agent/system/ipset-restore.service    /etc/systemd/system/ipset-restore.service
 
 sudo systemctl daemon-reload
 sudo systemctl enable ipset-restore
@@ -194,8 +213,8 @@ sudo iptables-save | sudo tee /etc/iptables/rules.v4 >/dev/null
 sudo ipset save    | sudo tee /etc/ipset.conf        >/dev/null
 
 # Install restore units from repository (IPv4 + ipset)
-sudo cp system/iptables-restore.service /etc/systemd/system/iptables-restore.service
-sudo cp system/ipset-restore.service    /etc/systemd/system/ipset-restore.service
+sudo cp ~/Fail2BanEntreprise/agent/system/iptables-restore.service /etc/systemd/system/iptables-restore.service
+sudo cp ~/Fail2BanEntreprise/agent/system/ipset-restore.service    /etc/systemd/system/ipset-restore.service
 
 sudo systemctl daemon-reload
 sudo systemctl enable iptables-restore ipset-restore
@@ -209,8 +228,8 @@ sudo systemctl status ipset-restore    --no-pager
 ## Step 4 — Install Fail2Ban Actions (ipset + f2be)
 
 ```bash
-sudo cp action.d/f2be.conf  /etc/fail2ban/action.d/f2be.conf
-sudo cp action.d/ipset.conf /etc/fail2ban/action.d/ipset.conf
+sudo cp ~/Fail2BanEntreprise/agent/action.d/f2be.conf  /etc/fail2ban/action.d/f2be.conf
+sudo cp ~/Fail2BanEntreprise/agent/action.d/ipset.conf /etc/fail2ban/action.d/ipset.conf
 ```
 
 ## Step 5 — Install jail.local (per‑platform baseline)
@@ -219,13 +238,16 @@ Choose the file that matches your platform:
 
 ```bash
 # ViciDial / ViciBox
-sudo cp jails/vicidial.conf /etc/fail2ban/jail.local
+sudo cp ~/Fail2BanEntreprise/agent/jails/vicidial.conf /etc/fail2ban/jail.local
 
 # FusionPBX
-sudo cp jails/fusionpbx.conf /etc/fail2ban/jail.local
+sudo cp ~/Fail2BanEntreprise/agent/jails/fusionpbx.conf /etc/fail2ban/jail.local
 
-# Generic Debian
-sudo cp jails/debian.conf /etc/fail2ban/jail.local
+# Generic Debian (Debian <= 11)
+sudo cp ~/Fail2BanEntreprise/agent/jails/debian.conf /etc/fail2ban/jail.local
+
+# Generic Debian 12 / 13 (using systemd-journald)
+sudo cp ~/Fail2BanEntreprise/agent/jails/debian12.conf /etc/fail2ban/jail.local
 
 > **⚠️ Before reloading:** Edit `jail.local` and verify the `ignoreip` line includes your office IP and VPN exit IP. Getting blocked by any jail locks out SSH + web + SIP simultaneously.
 
@@ -249,9 +271,9 @@ sudo fail2ban-client status
 
 ```bash
 # Copy agent binary
-sudo cp agent.py /usr/local/bin/f2b-agent
+sudo cp ~/Fail2BanEntreprise/agent/agent.py /usr/local/bin/f2b-agent
 sudo chmod +x /usr/local/bin/f2b-agent
-sudo cp f2b-agent.conf.example /etc/f2b-agent.conf
+sudo cp ~/Fail2BanEntreprise/agent/f2b-agent.conf.example /etc/f2b-agent.conf
 
 # Verify
 f2b-agent help
@@ -283,7 +305,7 @@ f2b-agent help
 ## Step 9 — Install agent systemd service
 
 ```bash
-sudo cp system/f2b-agent.service /etc/systemd/system/f2b-agent.service
+sudo cp ~/Fail2BanEntreprise/agent/system/f2b-agent.service /etc/systemd/system/f2b-agent.service
 sudo systemctl daemon-reload
 sudo systemctl enable f2b-agent
 sudo systemctl restart f2b-agent
