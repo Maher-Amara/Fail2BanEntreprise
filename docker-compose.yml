@@ -5,7 +5,7 @@ services:
       - "6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} --replicaof ${REDIS_MASTER_HOST} ${REDIS_MASTER_PORT} --masterauth ${REDIS_MASTER_PASSWORD}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD} #--replicaof ${REDIS_MASTER_HOST} ${REDIS_MASTER_PORT} --masterauth ${REDIS_MASTER_PASSWORD}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
