@@ -10,6 +10,12 @@ ExecStart=/usr/local/bin/f2b-agent sync-loop
 Restart=on-failure
 RestartSec=15
 
+# Suppress stdout from reaching syslog/journal — agent writes its own log file.
+# This prevents log duplication into /var/log/syslog and /var/log/daemon.log.
+StandardOutput=null
+StandardError=journal
+LogLevelMax=warning
+
 # Harden the service
 NoNewPrivileges=yes
 

@@ -36,12 +36,23 @@ from typing import Dict, List, Optional
 # ── Constants ──────────────────────────────────────────────────────────────
 
 CONFIG_FILE = "/etc/f2b-agent.conf"
-LOG_FILE    = "/var/log/f2b-agent.log"
+LOG_FILE = "/var/log/f2b-agent.log"
+
+# Log level names accepted in config (case-insensitive)
+_LOG_LEVELS = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
 
 DEFAULTS = {  # type: Dict[str, str]
     "F2B_API_URL":             "https://f2b.scopcall.com",
     "F2B_API_KEY":       "",
     "F2B_SYNC_INTERVAL": "60",
+    "F2B_LOG_LEVEL":     "WARNING",
+    "F2B_HEARTBEAT_INTERVAL": "3600",
     "F2B_IPSET_WHITELIST_NAME": "whitelist",
     "F2B_IPSET_BLACKLIST_NAME": "blacklist",
     "F2B_IPSET_SETS": "ssh,sip,db,web,proxy,email",
@@ -50,11 +61,11 @@ DEFAULTS = {  # type: Dict[str, str]
 # ── Logging ───────────────────────────────────────────────────────────────
 
 
-def _setup_logging() -> logging.Logger:
+def _setup_logging(level: int = logging.WARNING) -> logging.Logger:
     fmt = "[%(asctime)s] %(levelname)s %(message)s"
     datefmt = "%Y-%m-%d %H:%M:%S"
     logger = logging.getLogger("f2b-agent")
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(level)
 
     # Console handler
     ch = logging.StreamHandler(sys.stdout)
@@ -73,7 +84,17 @@ def _setup_logging() -> logging.Logger:
     return logger
 
 
-log = _setup_logging()
+# Initial setup at WARNING; reconfigured after config is loaded
+log = _setup_logging(logging.WARNING)
+
+
+def _reconfigure_log_level(cfg: Dict[str, str]) -> None:
+    """Update the logger level from the loaded configuration."""
+    level_name = cfg.get("F2B_LOG_LEVEL", "WARNING").upper()
+    level = _LOG_LEVELS.get(level_name, logging.WARNING)
+    log.setLevel(level)
+    for handler in log.handlers:
+        handler.setLevel(level)
 
 # ── Configuration ──────────────────────────────────────────────────────────
 
@@ -313,8 +334,12 @@ def action_notify_unban(ip: str, jail: str = "unknown") -> None:
     )
 
 
-def action_sync(cfg: Dict[str, str]) -> None:
-    log.info("SYNC start")
+def action_sync(cfg: Dict[str, str]) -> bool:
+    """
+    Pull global ban/whitelist state and reconcile local ipset membership.
+    Returns True on success, False on failure.
+    """
+    log.debug("SYNC start")
 
     blacklist_set = cfg.get("F2B_IPSET_BLACKLIST_NAME", "blacklist")
     category_sets = _parse_sets_cfg(cfg.get("F2B_IPSET_SETS", ""))
@@ -326,8 +351,7 @@ def action_sync(cfg: Dict[str, str]) -> None:
         cfg["F2B_API_KEY"],
     )
     if data is None:
-        log.warning("SYNC failed - API request rejected or unreachable")
-        return
+        return False
 
     bans = data.get("bans", [])  # type: List[Dict]
     whitelist = data.get("whitelist", [])  # type: List[str]
@@ -394,19 +418,56 @@ def action_sync(cfg: Dict[str, str]) -> None:
             dels += 1
         results.append("{}:+{} -{}".format(set_name, adds, dels))
 
-    # Log summary
+    # Log summary (debug level — state changes are logged by sync_loop)
     summary = ", ".join(results) if results else "no sets updated"
-    log.info("SYNC done: %s", summary)
+    log.debug("SYNC done: %s", summary)
+    return True
 
 
 def action_sync_loop(cfg: Dict[str, str]) -> None:
     interval = int(cfg.get("F2B_SYNC_INTERVAL", 60))
-    log.info("Starting sync-loop (interval=%ds)", interval)
+    heartbeat_interval = int(cfg.get("F2B_HEARTBEAT_INTERVAL", 3600))
+    log.info("Starting sync-loop (interval=%ds, heartbeat=%ds)",
+             interval, heartbeat_interval)
+
+    last_sync_failed = False
+    last_heartbeat = time.monotonic()
+    sync_ok_count = 0
+    sync_fail_count = 0
+
     while True:
         try:
-            action_sync(cfg)
+            ok = action_sync(cfg)
         except Exception as exc:  # noqa: BLE001
             log.error("SYNC error: %s", exc)
+            ok = False
+
+        # ── State-change logging ──────────────────────────────
+        # Only log when the sync state transitions, not every cycle.
+        if ok:
+            sync_ok_count += 1
+            if last_sync_failed:
+                log.warning(
+                    "SYNC restored after %d consecutive failures", sync_fail_count)
+                sync_fail_count = 0
+            last_sync_failed = False
+        else:
+            sync_fail_count += 1
+            if not last_sync_failed:
+                log.warning("SYNC failed - API unreachable or rejected")
+            last_sync_failed = True
+
+        # ── Periodic heartbeat (default: hourly) ──────────────
+        now = time.monotonic()
+        if now - last_heartbeat >= heartbeat_interval:
+            log.info(
+                "SYNC heartbeat: %d ok, %d failed since last heartbeat",
+                sync_ok_count, sync_fail_count,
+            )
+            sync_ok_count = 0
+            sync_fail_count = 0
+            last_heartbeat = now
+
         time.sleep(interval)
 
 
@@ -458,6 +519,7 @@ def main() -> None:
         return
 
     cfg = load_config()
+    _reconfigure_log_level(cfg)
 
     if not cfg.get("F2B_API_KEY"):
         log.error(

@@ -118,6 +118,8 @@ Immediately whitelist baseline IPs (including your current IP):
 # Add baseline entries (CIDRs supported by whitelist hash:net)
 sudo ipset add whitelist 127.0.0.1 -exist
 sudo ipset add whitelist 196.179.222.182 -exist
+sudo ipset add whitelist 162.19.231.240 -exist
+sudo ipset add whitelist 164.132.47.223 -exist
 sudo ipset add whitelist 213.144.214.192/26 -exist
 sudo ipset add whitelist 81.95.124.1/26 -exist
 sudo ipset add whitelist 81.95.119.128/26 -exist
@@ -187,21 +189,18 @@ sudo iptables -P OUTPUT ACCEPT
 #### debian
 
 ```bash
+# Install persistence helpers
+sudo apt-get update && sudo apt-get install -y iptables-persistent ipset-persistent
+
+# Save current rules
+sudo iptables-save   | sudo tee /etc/iptables/rules.v4 >/dev/null
+sudo ipset save      | sudo tee /etc/ipset.conf        >/dev/null
 sudo netfilter-persistent save
+
+# Enable restore services
 sudo systemctl enable netfilter-persistent
 sudo systemctl start netfilter-persistent
 sudo systemctl status netfilter-persistent --no-pager
-
-sudo ipset save    | sudo tee /etc/ipset.conf        >/dev/null
-sudo cp ~/Fail2BanEntreprise/agent/system/ipset-restore.service    /etc/systemd/system/ipset-restore.service
-
-sudo systemctl daemon-reload
-sudo systemctl enable ipset-restore
-sudo systemctl start  ipset-restore
-
-# Verify
-sudo systemctl status ipset-restore --no-pager
-
 ```
 
 #### openSuse
@@ -253,7 +252,7 @@ sudo cp ~/Fail2BanEntreprise/agent/jails/debian12.conf /etc/fail2ban/jail.local
 
 ```ini
 # Already set in all configs — adjust if needed:
-ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.0/26 81.95.119.128/26
+ignoreip = 127.0.0.1/8 ::1 196.179.222.182 162.19.231.240 164.132.47.223 213.144.214.192/26 81.95.124.0/26 81.95.119.128/26
 ```
 
 ## Step 6 — Enable and Reload Fail2Ban

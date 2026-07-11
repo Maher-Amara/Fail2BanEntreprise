@@ -284,7 +284,7 @@ Create or edit `/etc/fail2ban/jail.local`:
 [DEFAULT]
 # ── IPs that will NEVER be banned ──
 # Office IP  |  Datacenter FR (server subnet)  |  Datacenter BE
-ignoreip = 127.0.0.1/8 ::1 196.179.222.182 213.144.214.192/26 81.95.124.0/26 81.95.119.128/26
+ignoreip = 127.0.0.1/8 ::1 196.179.222.182 162.19.231.240 164.132.47.223 213.144.214.192/26 81.95.124.0/26 81.95.119.128/26
 
 # ── Ban Parameters ──
 bantime   = 86400       ; 24 hours default (override per-jail as needed)
@@ -326,6 +326,8 @@ When Fail2Ban bans an IP with `iptables-allports` or `iptables-multiport`, traff
 | ---------------- | -------------------- | ------------------------------------------ |
 | Loopback         | `127.0.0.1`          | Localhost                                  |
 | Office           | `196.179.222.182`    | Management / admin access                  |
+| backup VPS 1     | `162.19.231.240`     | Management / admin access                  |
+| backup VPS 2     | `164.132.47.223`     | Management / admin access                  |
 | Datacenter FR    | `213.144.214.192/26` | Server subnet — prevents self-banning      |
 | Datacenter BE    | `81.95.124.53/26`    | Secondary datacenter / replication traffic |
 

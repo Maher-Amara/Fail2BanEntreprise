@@ -17,6 +17,15 @@ F2B_API_KEY="your-per-server-token-here"
 # Sync interval in seconds
 F2B_SYNC_INTERVAL=60
 
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+# Default is WARNING — safe for production. Use INFO or DEBUG only for troubleshooting.
+F2B_LOG_LEVEL="WARNING"
+
+# Heartbeat interval in seconds — how often to log a summary to the log file.
+# Default is 3600 (1 hour). The agent runs silently between heartbeats
+# unless a state change occurs (e.g. API becomes unreachable or recovers).
+F2B_HEARTBEAT_INTERVAL=3600
+
 # Ensure sets and rules are created ,before enabling the agent service.
 #
 # Whitelist (hash:net) — IPs/CIDRs here are skipped from all target sets
