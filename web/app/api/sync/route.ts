@@ -1,4 +1,4 @@
-import { verifyApiKeyFull, extractApiKey, extractClientIp } from "@/lib/auth";
+import { verifyApiKeyFull, extractApiKey, extractClientIp, extractPublicUrl } from "@/lib/auth";
 import { getAllBans, getWhitelist, getTempWhitelist, pushFailedAuth } from "@/lib/redis";
 
 export async function GET(request: Request) {
@@ -9,7 +9,7 @@ export async function GET(request: Request) {
       await pushFailedAuth({
         ip: extractClientIp(request),
         token: extractApiKey(request) ?? "<none>",
-        url: request.url,
+        url: extractPublicUrl(request),
         timestamp: new Date().toISOString(),
         reason: authReason ?? "token_mismatch",
       });

@@ -24,7 +24,14 @@ interface FailedAuthEntry {
   server?: string;
 }
 
-interface MeData { username: string; ip: string; city?: string; country?: string; }
+interface MeData {
+  username: string;
+  ip: string;
+  city?: string;
+  country?: string;
+  publicBaseUrl?: string;
+  headers?: Record<string, string | null>;
+}
 
 export default function ServersPage() {
   const [servers, setServers] = useState<ServerRecord[]>([]);
@@ -40,6 +47,7 @@ export default function ServersPage() {
   const [authorizingTs, setAuthorizingTs] = useState<string | null>(null);
   const [authorizeName, setAuthorizeName] = useState("");
   const [authorizeError, setAuthorizeError] = useState("");
+  const [showHeaderDiag, setShowHeaderDiag] = useState(false);
 
   const fetchServers = useCallback(async () => {
     const res = await fetch("/api/servers");
@@ -134,6 +142,10 @@ export default function ServersPage() {
   }
 
   const location = me ? [me.city, me.country].filter(Boolean).join(", ") : undefined;
+  // Determine if the FQDN was resolved via Cloudflare headers or fell back to internal
+  const detectedFqdn = me?.publicBaseUrl;
+  const isCloudflare = !!(me?.headers?.["cf-connecting-ip"] || me?.headers?.["x-forwarded-host"]);
+  const agentApiUrl = detectedFqdn ?? "https://f2b.callcenter-erp.com";
 
   return (
     <div className="flex flex-col flex-1">
@@ -143,6 +155,65 @@ export default function ServersPage() {
         <div>
           <h1 className="text-2xl font-bold">Servers</h1>
           <p className="text-muted text-sm mt-1">Each registered server gets a unique API token used by its Fail2Ban agent.</p>
+        </div>
+
+        {/* ── FQDN / Tunnel Diagnostic Banner ───────────────────────── */}
+        <div className="bg-card border border-card-border rounded-xl p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="space-y-1">
+              <h2 className="text-sm font-semibold text-muted">Detected Public URL</h2>
+              <div className="flex items-center gap-2 flex-wrap">
+                <code className="text-sm font-mono font-medium text-foreground">
+                  {detectedFqdn ?? <span className="text-muted italic">loading…</span>}
+                </code>
+                {detectedFqdn && (
+                  isCloudflare ? (
+                    <span className="px-2 py-0.5 text-[10px] font-semibold bg-success/10 text-success border border-success/20 rounded-full">
+                      ✓ Cloudflare headers
+                    </span>
+                  ) : (
+                    <span className="px-2 py-0.5 text-[10px] font-semibold bg-warning/10 text-warning border border-warning/20 rounded-full">
+                      ⚠ No CF headers — internal fallback
+                    </span>
+                  )
+                )}
+              </div>
+              <p className="text-xs text-muted">
+                This is the FQDN agents must reach, resolved from{" "}
+                <code className="font-mono">x-forwarded-host</code> /
+                {" "}<code className="font-mono">cf-visitor</code> headers.
+              </p>
+            </div>
+            <button
+              onClick={() => setShowHeaderDiag(v => !v)}
+              className="px-3 py-1.5 text-xs bg-card-border/30 hover:bg-card-border/60 rounded-md transition-colors whitespace-nowrap"
+            >
+              {showHeaderDiag ? "Hide" : "Show"} raw headers
+            </button>
+          </div>
+
+          {showHeaderDiag && me?.headers && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="text-muted text-left border-b border-card-border">
+                    <th className="py-1 pr-4 font-semibold">Header</th>
+                    <th className="py-1 font-semibold">Value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.entries(me.headers).map(([k, v]) => (
+                    <tr key={k} className="border-b border-card-border/30">
+                      <td className="py-1 pr-4 text-muted whitespace-nowrap">{k}</td>
+                      <td className="py-1 break-all">
+                        {v ?? <span className="text-muted italic opacity-50">not present</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Token reveal after create / authorize */}
@@ -412,10 +483,16 @@ export default function ServersPage() {
           <h2 className="text-sm font-semibold text-muted">Agent Configuration</h2>
           <p className="text-xs text-muted">Add to <code className="font-mono">/etc/f2b-agent.conf</code> on each server:</p>
           <pre className="bg-background rounded-lg px-4 py-3 text-xs font-mono overflow-x-auto border border-card-border">
-{`F2B_API_URL="https://f2b.callcenter-erp.com"
+{`F2B_API_URL="${agentApiUrl}"
 F2B_API_KEY="<token-from-above>"
 F2B_SERVER_NAME="<server-name>"`}
           </pre>
+          {!isCloudflare && detectedFqdn && (
+            <p className="text-xs text-warning">
+              ⚠ Cloudflare headers were not detected — the URL above may be the internal address.
+              Ensure <code className="font-mono">x-forwarded-host</code> is forwarded by your tunnel.
+            </p>
+          )}
         </div>
       </main>
     </div>

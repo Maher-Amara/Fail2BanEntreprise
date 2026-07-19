@@ -1,4 +1,4 @@
-import { verifyApiKeyFull, getSessionFromCookies, extractApiKey, extractClientIp } from "@/lib/auth";
+import { verifyApiKeyFull, getSessionFromCookies, extractApiKey, extractClientIp, extractPublicUrl } from "@/lib/auth";
 import { addBan, isWhitelisted, publishEvent, pushAudit, pushFailedAuth } from "@/lib/redis";
 import { lookupIP } from "@/lib/geoip";
 import { checkIP, intelEnabled } from "@/lib/intel";
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
       await pushFailedAuth({
         ip: extractClientIp(request),
         token: extractApiKey(request) ?? "<none>",
-        url: request.url,
+        url: extractPublicUrl(request),
         timestamp: new Date().toISOString(),
         reason: authReason ?? "token_mismatch",
       });

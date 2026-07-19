@@ -50,7 +50,7 @@ export async function verifyApiKeyFull(request: Request): Promise<ApiKeyResult> 
 
   if (server.registered_ip && server.registered_ip !== clientIp) {
     // Token is valid but IP does not match — log the rejection, do NOT update last_seen
-    await recordIpMismatchRejection(server, clientIp, request.url, key);
+    await recordIpMismatchRejection(server, clientIp, extractPublicUrl(request), key);
     return { server: null, reason: "ip_mismatch" };
   }
 
@@ -67,10 +67,56 @@ export function extractApiKey(request: Request): string | null {
 /** Extract the requester's IP from standard proxy headers, falling back to "unknown". */
 export function extractClientIp(request: Request): string {
   return (
+    request.headers.get("cf-connecting-ip") ||
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
     "unknown"
   );
+}
+
+/**
+ * Reconstruct the real public-facing URL from Cloudflare Tunnel headers.
+ *
+ * When running behind cloudflared, Next.js sees the internal bind address
+ * (e.g. http://0.0.0.0:3000/api/ban) rather than the public FQDN.
+ * Cloudflare injects three useful headers:
+ *   - CF-Visitor:         {"scheme":"https"}   — the public scheme
+ *   - X-Forwarded-Host:  f2b.callcenter-erp.com — the public hostname
+ *   - X-Forwarded-Proto: https                 — alternative scheme header
+ *
+ * We combine those with the path from request.url to produce the correct URL
+ * (e.g. https://f2b.callcenter-erp.com/api/ban).
+ * Falls back gracefully to request.url when not behind Cloudflare.
+ */
+export function extractPublicUrl(request: Request): string {
+  try {
+    // Prefer the explicit forwarded host; fallback to the Host header
+    const host =
+      request.headers.get("x-forwarded-host") ||
+      request.headers.get("host");
+
+    if (!host) return request.url;
+
+    // Cloudflare sends CF-Visitor: {"scheme":"https"}
+    const cfVisitor = request.headers.get("cf-visitor");
+    let scheme = "https"; // Cloudflare always terminates TLS
+    if (cfVisitor) {
+      try {
+        const parsed = JSON.parse(cfVisitor) as { scheme?: string };
+        if (parsed.scheme) scheme = parsed.scheme;
+      } catch { /* ignore malformed CF-Visitor */ }
+    } else {
+      // Fallback: X-Forwarded-Proto (nginx / other proxies)
+      scheme = request.headers.get("x-forwarded-proto") || "https";
+    }
+
+    // Extract only the path + query from the internal URL to avoid leaking
+    // the internal host/port in the reconstructed URL.
+    const internal = new URL(request.url);
+    return `${scheme}://${host}${internal.pathname}${internal.search}`;
+  } catch {
+    return request.url;
+  }
 }
 
 
