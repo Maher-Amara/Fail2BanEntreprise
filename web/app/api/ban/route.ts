@@ -1,5 +1,5 @@
-import { verifyApiKey, getSessionFromCookies } from "@/lib/auth";
-import { addBan, isWhitelisted, publishEvent, pushAudit } from "@/lib/redis";
+import { verifyApiKey, getSessionFromCookies, extractApiKey, extractClientIp } from "@/lib/auth";
+import { addBan, isWhitelisted, publishEvent, pushAudit, pushFailedAuth } from "@/lib/redis";
 import { lookupIP } from "@/lib/geoip";
 import { checkIP, intelEnabled } from "@/lib/intel";
 import { banSchema, parseBody } from "@/lib/validation";
@@ -9,6 +9,13 @@ export async function POST(request: Request) {
   const server = await verifyApiKey(request);
   const session = server ? null : await getSessionFromCookies();
   if (!server && !session) {
+    // Log the failed attempt before rejecting
+    await pushFailedAuth({
+      ip: extractClientIp(request),
+      token: extractApiKey(request) ?? "<none>",
+      url: request.url,
+      timestamp: new Date().toISOString(),
+    });
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -56,3 +63,4 @@ export async function POST(request: Request) {
 
   return Response.json({ status: "banned", ban, intel });
 }
+

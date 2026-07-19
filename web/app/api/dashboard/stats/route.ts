@@ -1,5 +1,5 @@
 import { getSessionFromCookies } from "@/lib/auth";
-import { getAllBans, getWhitelist, getTempWhitelist, getAuditLog } from "@/lib/redis";
+import { getAllBans, getWhitelist, getTempWhitelist, getAuditLog, getFilterOptions } from "@/lib/redis";
 
 export async function GET() {
   const session = await getSessionFromCookies();
@@ -7,11 +7,12 @@ export async function GET() {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const [bans, whitelist, tempWhitelist, audit] = await Promise.all([
+  const [bans, whitelist, tempWhitelist, audit, filters] = await Promise.all([
     getAllBans(),
     getWhitelist(),
     getTempWhitelist(),
-    getAuditLog(50),
+    getAuditLog(300),
+    getFilterOptions(),
   ]);
 
   // Aggregate stats
@@ -31,6 +32,16 @@ export async function GET() {
   const today = new Date().toISOString().split("T")[0];
   const eventsToday = audit.filter((e) => e.timestamp.startsWith(today)).length;
 
+  // Build filter dropdown choices (combine active distributions and stored set values)
+  const allJails = Array.from(new Set([...Object.keys(jailCounts), ...filters.jails])).sort();
+  const allServers = Array.from(new Set([...Object.keys(serverCounts), ...filters.servers])).sort();
+  const allCountries = Array.from(new Set([...Object.keys(countryCounts), ...filters.countries])).sort();
+
+  // Recent bans for the quick attacker view
+  const recentBans = [...bans]
+    .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    .slice(0, 8);
+
   return Response.json({
     stats: {
       totalBans: bans.length,
@@ -39,10 +50,15 @@ export async function GET() {
       topJail:
         Object.entries(jailCounts).sort(([, a], [, b]) => b - a)[0]?.[0] || "none",
     },
-    bans,
     jailDistribution: jailCounts,
     countryDistribution: countryCounts,
     serverDistribution: serverCounts,
     recentEvents: audit,
+    recentBans,
+    filters: {
+      jails: allJails,
+      servers: allServers,
+      countries: allCountries,
+    },
   });
 }

@@ -11,16 +11,27 @@ interface ServerRecord {
   created_at: string;
 }
 
+interface FailedAuthEntry {
+  ip: string;
+  token: string;
+  url: string;
+  timestamp: string;
+}
+
 interface MeData { username: string; ip: string; city?: string; country?: string; }
 
 export default function ServersPage() {
   const [servers, setServers] = useState<ServerRecord[]>([]);
+  const [failedAuths, setFailedAuths] = useState<FailedAuthEntry[]>([]);
   const [me, setMe] = useState<MeData | null>(null);
   const [newName, setNewName] = useState("");
   const [newToken, setNewToken] = useState<{ name: string; token: string } | null>(null);
   const [rotatedToken, setRotatedToken] = useState<{ id: number; token: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [authorizingTs, setAuthorizingTs] = useState<string | null>(null);
+  const [authorizeName, setAuthorizeName] = useState("");
+  const [authorizeError, setAuthorizeError] = useState("");
 
   const fetchServers = useCallback(async () => {
     const res = await fetch("/api/servers");
@@ -28,10 +39,16 @@ export default function ServersPage() {
     setLoading(false);
   }, []);
 
+  const fetchFailedAuths = useCallback(async () => {
+    const res = await fetch("/api/failed-auths");
+    if (res.ok) setFailedAuths((await res.json()).attempts ?? []);
+  }, []);
+
   useEffect(() => {
     fetchServers();
+    fetchFailedAuths();
     fetch("/api/me").then(r => r.ok ? r.json() : null).then(d => d && setMe(d));
-  }, [fetchServers]);
+  }, [fetchServers, fetchFailedAuths]);
 
   async function handleCreate() {
     if (!newName.trim()) return;
@@ -61,6 +78,48 @@ export default function ServersPage() {
     setServers(servers.filter(s => s.id !== id));
   }
 
+  async function handleDismiss(timestamp: string) {
+    await fetch("/api/failed-auths", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timestamp }),
+    });
+    setFailedAuths(prev => prev.filter(a => a.timestamp !== timestamp));
+  }
+
+  function startAuthorize(timestamp: string) {
+    setAuthorizingTs(timestamp);
+    setAuthorizeName("");
+    setAuthorizeError("");
+  }
+
+  async function handleAuthorize(entry: FailedAuthEntry) {
+    if (!authorizeName.trim()) { setAuthorizeError("Server name is required"); return; }
+    setAuthorizeError("");
+    const res = await fetch("/api/failed-auths/authorize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ timestamp: entry.timestamp, name: authorizeName.trim() }),
+    });
+    const data = await res.json();
+    if (!res.ok) { setAuthorizeError(data.error); return; }
+    setNewToken({ name: authorizeName.trim(), token: data.token });
+    setAuthorizingTs(null);
+    setFailedAuths(prev => prev.filter(a => a.timestamp !== entry.timestamp));
+    fetchServers();
+  }
+
+  function relativeTime(ts: string): string {
+    const diff = Date.now() - new Date(ts).getTime();
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return `${s}s ago`;
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    return `${Math.floor(h / 24)}d ago`;
+  }
+
   const location = me ? [me.city, me.country].filter(Boolean).join(", ") : undefined;
 
   return (
@@ -73,11 +132,11 @@ export default function ServersPage() {
           <p className="text-muted text-sm mt-1">Each registered server gets a unique API token used by its Fail2Ban agent.</p>
         </div>
 
-        {/* Token reveal after create */}
+        {/* Token reveal after create / authorize */}
         {newToken && (
           <div className="bg-success/5 border border-success/30 rounded-xl p-4 space-y-3">
-            <p className="text-success font-semibold">✓ Server &quot;{newToken.name}&quot; created</p>
-            <p className="text-sm text-muted">Copy this token now — it will <strong>never</strong> be shown again.</p>
+            <p className="text-success font-semibold">✓ Server &quot;{newToken.name}&quot; authorized</p>
+            <p className="text-sm text-muted">This token is now active. Copy it if you need it — it will <strong>never</strong> be shown again.</p>
             <div className="flex items-center gap-2">
               <code className="flex-1 bg-background px-3 py-2 rounded-lg text-xs font-mono break-all border border-card-border">
                 {newToken.token}
@@ -169,12 +228,113 @@ export default function ServersPage() {
           )}
         </div>
 
+        {/* ── Failed Auth Attempts ─────────────────────────────────── */}
+        <div className="space-y-3">
+          <div>
+            <h2 className="text-lg font-semibold">Failed Auth Attempts</h2>
+            <p className="text-muted text-sm mt-0.5">
+              Requests to agent endpoints that used an unrecognized token. Authorize to register the server immediately.
+            </p>
+          </div>
+
+          <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+            {failedAuths.length === 0 ? (
+              <div className="text-center text-muted py-8 text-sm">No failed attempts recorded</div>
+            ) : (
+              <div className="divide-y divide-card-border/50">
+                {failedAuths.map((entry) => (
+                  <div key={entry.timestamp} className="p-4 space-y-3">
+                    {/* Attempt summary row */}
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+                          <span className="font-semibold text-foreground font-mono">{entry.ip}</span>
+                          <span title={new Date(entry.timestamp).toLocaleString()}>{relativeTime(entry.timestamp)}</span>
+                        </div>
+                        {/* Full FQDN URL */}
+                        <p className="text-xs text-muted font-mono truncate max-w-lg" title={entry.url}>
+                          {entry.url}
+                        </p>
+                        {/* Full token */}
+                        <div className="flex items-center gap-2 mt-1">
+                          <code className="text-xs font-mono bg-background border border-card-border px-2 py-1 rounded break-all">
+                            {entry.token}
+                          </code>
+                          {entry.token !== "<none>" && (
+                            <button
+                              onClick={() => navigator.clipboard.writeText(entry.token)}
+                              className="px-2 py-1 text-xs bg-accent/10 text-accent hover:bg-accent/20 rounded transition-colors whitespace-nowrap"
+                            >
+                              Copy
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2 shrink-0">
+                        {entry.token !== "<none>" && authorizingTs !== entry.timestamp && (
+                          <button
+                            onClick={() => startAuthorize(entry.timestamp)}
+                            className="px-3 py-1.5 text-xs bg-success/10 text-success hover:bg-success/20 rounded-md transition-colors font-medium"
+                          >
+                            Authorize
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleDismiss(entry.timestamp)}
+                          className="px-3 py-1.5 text-xs bg-danger/10 text-danger hover:bg-danger/20 rounded-md transition-colors"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Inline authorize form */}
+                    {authorizingTs === entry.timestamp && (
+                      <div className="bg-background border border-accent/30 rounded-lg p-3 space-y-2">
+                        <p className="text-xs text-muted">
+                          Give this server a name. Its existing token will be stored and will start working immediately.
+                        </p>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={authorizeName}
+                            onChange={e => setAuthorizeName(e.target.value)}
+                            onKeyDown={e => e.key === "Enter" && handleAuthorize(entry)}
+                            placeholder="e.g. dialer2.callpro.be"
+                            autoFocus
+                            className="flex-1 px-3 py-1.5 bg-card border border-card-border rounded-lg text-sm focus:outline-none focus:border-accent"
+                          />
+                          <button
+                            onClick={() => handleAuthorize(entry)}
+                            className="px-3 py-1.5 text-xs bg-success hover:bg-success/80 text-white rounded-md transition-colors font-medium"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            onClick={() => setAuthorizingTs(null)}
+                            className="px-3 py-1.5 text-xs bg-card-border/30 hover:bg-card-border/60 rounded-md transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                        {authorizeError && <p className="text-danger text-xs">{authorizeError}</p>}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Agent config snippet */}
         <div className="bg-card border border-card-border rounded-xl p-4 space-y-2">
           <h2 className="text-sm font-semibold text-muted">Agent Configuration</h2>
           <p className="text-xs text-muted">Add to <code className="font-mono">/etc/f2b-agent.conf</code> on each server:</p>
           <pre className="bg-background rounded-lg px-4 py-3 text-xs font-mono overflow-x-auto border border-card-border">
-{`F2B_API_URL="https://f2b.scopcall.com"
+{`F2B_API_URL="https://f2b.callcenter-erp.com"
 F2B_API_KEY="<token-from-above>"
 F2B_SERVER_NAME="<server-name>"`}
           </pre>

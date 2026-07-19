@@ -1,6 +1,6 @@
 [Unit]
 Description=Fail2BanEntreprise Agent — Ban sync
-Documentation=https://f2b.scopcall.com/servers
+Documentation=https://f2b.callcenter-erp.com/servers
 After=network-online.target fail2ban.service
 Wants=network-online.target fail2ban.service
 

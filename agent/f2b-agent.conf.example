@@ -2,13 +2,13 @@
 # Fail2BanEntreprise Agent Configuration
 #
 # Steps:
-#   1. Log in to https://f2b.scopcall.com
+#   1. Log in to https://f2b.callcenter-erp.com
 #   2. Servers → Register New Server → enter this server's hostname
 #   3. Copy the generated token (shown only once)
 #   4. Paste it as F2B_API_KEY below
 
 # Dashboard URL (no trailing slash)
-F2B_API_URL="https://f2b.scopcall.com"
+F2B_API_URL="https://f2b.callcenter-erp.com"
 
 # Per-server token — generated from dashboard → Servers page
 # Uniquely identifies this server. Never share it across servers.

@@ -292,12 +292,12 @@ f2b-agent help
     sudo nano /etc/f2b-agent.conf
     ```
 
-3. Log in at **<https://f2b.scopcall.com/servers>**
+3. Log in at **<https://f2b.callcenter-erp.com/servers>**
 4. Copy the generated token — **shown only once**
     Set your token:
 
     ```conf
-    F2B_API_URL="https://f2b.scopcall.com"
+    F2B_API_URL="https://f2b.callcenter-erp.com"
     F2B_API_KEY="your-server-token-here"
     ```
 

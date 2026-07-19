@@ -1,9 +1,17 @@
-import { verifyApiKey } from "@/lib/auth";
-import { getAllBans, getWhitelist, getTempWhitelist } from "@/lib/redis";
+import { verifyApiKey, extractApiKey, extractClientIp } from "@/lib/auth";
+import { getAllBans, getWhitelist, getTempWhitelist, pushFailedAuth } from "@/lib/redis";
 
 export async function GET(request: Request) {
   const server = await verifyApiKey(request);
-  if (!server) return Response.json({ error: "Unauthorized" }, { status: 401 });
+  if (!server) {
+    await pushFailedAuth({
+      ip: extractClientIp(request),
+      token: extractApiKey(request) ?? "<none>",
+      url: request.url,
+      timestamp: new Date().toISOString(),
+    });
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   const [bans, whitelist, tempWhitelist] = await Promise.all([
     getAllBans(),

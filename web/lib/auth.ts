@@ -29,6 +29,21 @@ export async function verifyApiKey(request: Request): Promise<ServerRecord | nul
   return server;
 }
 
+/** Read the raw x-api-key header without doing any DB lookup — used for logging. */
+export function extractApiKey(request: Request): string | null {
+  return request.headers.get("x-api-key");
+}
+
+/** Extract the requester's IP from standard proxy headers, falling back to "unknown". */
+export function extractClientIp(request: Request): string {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("x-real-ip") ||
+    "unknown"
+  );
+}
+
+
 /** Fallback: also accept the legacy env API_KEY for backward compat */
 export function verifyLegacyApiKey(request: Request): boolean {
   const key = request.headers.get("x-api-key");

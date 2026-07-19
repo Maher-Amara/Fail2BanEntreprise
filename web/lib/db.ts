@@ -162,6 +162,25 @@ export function createServer(name: string, ownerId: number): { server: ServerRec
   return { server, token };
 }
 
+/**
+ * Creates a server using a caller-supplied plain-text token.
+ * Used when authorizing a server from a failed-auth entry so the
+ * agent's existing token immediately starts working without reconfiguration.
+ */
+export function createServerWithToken(name: string, token: string, ownerId: number): ServerRecord {
+  const token_hash = hashToken(token);
+  const result = getDB().prepare(
+    "INSERT INTO servers (name, token_hash, owner_id) VALUES (?, ?, ?)"
+  ).run(name, token_hash, ownerId);
+  return {
+    id: result.lastInsertRowid as number,
+    name,
+    owner_id: ownerId,
+    last_seen: null,
+    created_at: new Date().toISOString(),
+  };
+}
+
 export function getServerByToken(token: string): ServerRecord | undefined {
   const h = hashToken(token);
   return getDB().prepare(

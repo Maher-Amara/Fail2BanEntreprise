@@ -48,7 +48,7 @@ _LOG_LEVELS = {
 }
 
 DEFAULTS = {  # type: Dict[str, str]
-    "F2B_API_URL":             "https://f2b.scopcall.com",
+    "F2B_API_URL":             "https://f2b.callcenter-erp.com",
     "F2B_API_KEY":       "",
     "F2B_SYNC_INTERVAL": "60",
     "F2B_LOG_LEVEL":     "WARNING",

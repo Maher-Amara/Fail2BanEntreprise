@@ -60,6 +60,11 @@ export async function addBan(ban: BanRecord): Promise<void> {
   const key = keys.ban(ban.ip);
   await r.hset(key, ban as unknown as Record<string, string>);
   if (ban.bantime > 0) await r.expire(key, ban.bantime);
+  
+  // Save filter options to Redis Sets for fast access
+  await r.sadd("jails", ban.jail);
+  await r.sadd("servers", ban.server);
+  if (ban.country) await r.sadd("countries", ban.country);
 }
 
 export async function removeBan(ip: string): Promise<void> {
@@ -74,18 +79,46 @@ export async function getBan(ip: string): Promise<BanRecord | null> {
 
 export async function getAllBans(): Promise<BanRecord[]> {
   const r = getRedis();
-  const bans: BanRecord[] = [];
+  const keysList: string[] = [];
   let cursor = "0";
   do {
-    const [next, foundKeys] = await r.scan(cursor, "MATCH", "ban:*", "COUNT", 200);
+    const [next, foundKeys] = await r.scan(cursor, "MATCH", "ban:*", "COUNT", 1000);
     cursor = next;
-    for (const key of foundKeys) {
-      const data = await r.hgetall(key);
-      if (data?.ip) bans.push({ ...data, bantime: Number(data.bantime) || 0 } as BanRecord);
-    }
+    keysList.push(...foundKeys);
   } while (cursor !== "0");
+
+  if (keysList.length === 0) return [];
+
+  const pipeline = r.pipeline();
+  for (const key of keysList) {
+    pipeline.hgetall(key);
+  }
+  const results = await pipeline.exec();
+
+  const bans: BanRecord[] = [];
+  for (const result of results || []) {
+    const [err, data] = result as [Error | null, Record<string, string>];
+    if (!err && data && data.ip) {
+      bans.push({ ...data, bantime: Number(data.bantime) || 0 } as BanRecord);
+    }
+  }
   return bans;
 }
+
+export async function getFilterOptions(): Promise<{ jails: string[]; servers: string[]; countries: string[] }> {
+  const r = getRedis();
+  const [jails, servers, countries] = await Promise.all([
+    r.smembers("jails"),
+    r.smembers("servers"),
+    r.smembers("countries"),
+  ]);
+  return {
+    jails: jails.sort(),
+    servers: servers.sort(),
+    countries: countries.sort(),
+  };
+}
+
 
 // ── Whitelist Operations (with CIDR matching) ──
 
@@ -151,9 +184,45 @@ export async function pushAudit(entry: AuditEntry): Promise<void> {
   await r.ltrim(keys.audit(), 0, 999);
 }
 
-export async function getAuditLog(limit = 100): Promise<AuditEntry[]> {
+export async function getAuditLog(limit = 300): Promise<AuditEntry[]> {
   const raw = await getRedis().lrange(keys.audit(), 0, limit - 1);
   return raw.map((s) => JSON.parse(s));
+}
+
+// ── Failed Auth Log ──
+
+export interface FailedAuthEntry {
+  /** Source IP of the requester */
+  ip: string;
+  /** Full x-api-key token submitted (or "<none>" if header was absent) */
+  token: string;
+  /** Full request URL including FQDN (e.g. https://f2b.example.com/api/ban) */
+  url: string;
+  timestamp: string;
+}
+
+export async function pushFailedAuth(entry: FailedAuthEntry): Promise<void> {
+  const r = getRedis();
+  await r.lpush("failed_auth", JSON.stringify(entry));
+  await r.ltrim("failed_auth", 0, 199); // cap at 200
+}
+
+export async function getFailedAuths(limit = 100): Promise<FailedAuthEntry[]> {
+  const raw = await getRedis().lrange("failed_auth", 0, limit - 1);
+  return raw.map((s) => JSON.parse(s) as FailedAuthEntry);
+}
+
+export async function deleteFailedAuth(timestamp: string): Promise<void> {
+  const r = getRedis();
+  const raw = await r.lrange("failed_auth", 0, -1);
+  for (const item of raw) {
+    const entry = JSON.parse(item) as FailedAuthEntry;
+    if (entry.timestamp === timestamp) {
+      // LREM count=0 removes all matching elements
+      await r.lrem("failed_auth", 0, item);
+      break;
+    }
+  }
 }
 
 // ── Pub/Sub ──
