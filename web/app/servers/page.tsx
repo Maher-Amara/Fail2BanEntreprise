@@ -221,65 +221,6 @@ export default function ServersPage() {
           <p className="text-muted text-sm mt-1">Each registered server is authenticated by <strong>token + IP + FQDN</strong>. All three must match.</p>
         </div>
 
-        {/* ── FQDN / Tunnel Diagnostic Banner ─────────────────────────── */}
-        <div className="bg-card border border-card-border rounded-xl p-4 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <h2 className="text-sm font-semibold text-muted">Detected Public URL</h2>
-              <div className="flex items-center gap-2 flex-wrap">
-                <code className="text-sm font-mono font-medium text-foreground">
-                  {detectedFqdn ?? <span className="text-muted italic">loading…</span>}
-                </code>
-                {detectedFqdn && (
-                  isCloudflare ? (
-                    <span className="px-2 py-0.5 text-[10px] font-semibold bg-success/10 text-success border border-success/20 rounded-full">
-                      ✓ Cloudflare headers
-                    </span>
-                  ) : (
-                    <span className="px-2 py-0.5 text-[10px] font-semibold bg-warning/10 text-warning border border-warning/20 rounded-full">
-                      ⚠ No CF headers — internal fallback
-                    </span>
-                  )
-                )}
-              </div>
-              <p className="text-xs text-muted">
-                This is the FQDN agents must reach, resolved from{" "}
-                <code className="font-mono">x-forwarded-host</code> /{" "}
-                <code className="font-mono">cf-visitor</code> headers.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowHeaderDiag(v => !v)}
-              className="px-3 py-1.5 text-xs bg-card-border/30 hover:bg-card-border/60 rounded-md transition-colors whitespace-nowrap"
-            >
-              {showHeaderDiag ? "Hide" : "Show"} raw headers
-            </button>
-          </div>
-
-          {showHeaderDiag && me?.headers && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs font-mono">
-                <thead>
-                  <tr className="text-muted text-left border-b border-card-border">
-                    <th className="py-1 pr-4 font-semibold">Header</th>
-                    <th className="py-1 font-semibold">Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.entries(me.headers).map(([k, v]) => (
-                    <tr key={k} className="border-b border-card-border/30">
-                      <td className="py-1 pr-4 text-muted whitespace-nowrap">{k}</td>
-                      <td className="py-1 break-all">
-                        {v ?? <span className="text-muted italic opacity-50">not present</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-
         {/* Token reveal after create / authorize */}
         {newToken && (
           <div className="bg-success/5 border border-success/30 rounded-xl p-4 space-y-3">
@@ -327,7 +268,7 @@ export default function ServersPage() {
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleCreate()}
-              placeholder="Name — e.g. dialer1.callpro.be"
+              placeholder="e.g. dialer1.callpro.be"
               className="flex-1 min-w-0 px-3 py-2 bg-background border border-card-border rounded-lg text-sm focus:outline-none focus:border-accent"
             />
             {/* IP — required */}
@@ -336,7 +277,7 @@ export default function ServersPage() {
               value={newIp}
               onChange={e => setNewIp(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleCreate()}
-              placeholder="Agent IP — e.g. 1.2.3.4"
+              placeholder="e.g. 1.2.3.4"
               title="The source IP address the agent will authenticate from. Required."
               className="w-full lg:w-44 px-3 py-2 bg-background border border-card-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent"
             />
@@ -587,23 +528,6 @@ export default function ServersPage() {
               </div>
             )}
           </div>
-        </div>
-
-        {/* ── Agent Configuration ───────────────────────────────────────── */}
-        <div className="bg-card border border-card-border rounded-xl p-4 space-y-2">
-          <h2 className="text-sm font-semibold text-muted">Agent Configuration</h2>
-          <p className="text-xs text-muted">Add to <code className="font-mono">/etc/f2b-agent.conf</code> on each server:</p>
-          <pre className="bg-background rounded-lg px-4 py-3 text-xs font-mono overflow-x-auto border border-card-border">
-{`F2B_API_URL="${agentApiUrl}"
-F2B_API_KEY="<token-from-above>"
-F2B_SERVER_NAME="<server-name>"`}
-          </pre>
-          {!isCloudflare && detectedFqdn && (
-            <p className="text-xs text-warning">
-              ⚠ Cloudflare headers were not detected — the URL above may be the internal address.
-              Ensure <code className="font-mono">x-forwarded-host</code> is forwarded by your tunnel.
-            </p>
-          )}
         </div>
       </main>
     </div>
