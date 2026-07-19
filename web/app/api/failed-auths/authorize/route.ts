@@ -1,4 +1,4 @@
-import { getSessionFromCookies } from "@/lib/auth";
+import { getSessionFromCookies, getAllowedOrigins } from "@/lib/auth";
 import { getFailedAuths, deleteFailedAuth, createServerWithToken } from "@/lib/redis";
 
 export async function POST(request: Request) {
@@ -30,10 +30,35 @@ export async function POST(request: Request) {
     );
   }
 
+  if (!entry.ip || entry.ip === "unknown") {
+    return Response.json(
+      { error: "Cannot authorize: source IP is unknown" },
+      { status: 422 }
+    );
+  }
+
+  // Validate that the FQDN from the failed attempt is in the allowed origins
+  const fqdn = entry.fqdn;
+  if (!fqdn) {
+    return Response.json(
+      { error: "Cannot authorize: no FQDN recorded for this attempt" },
+      { status: 422 }
+    );
+  }
+
+  const allowedOrigins = getAllowedOrigins();
+  if (allowedOrigins.length > 0 && !allowedOrigins.includes(fqdn)) {
+    return Response.json(
+      { error: `The FQDN "${fqdn}" recorded in this attempt is not in the allowed origins list` },
+      { status: 422 }
+    );
+  }
+
   let server;
   try {
     server = await createServerWithToken(name.trim(), entry.token, session.uid, {
-      registeredIp: entry.ip !== "unknown" ? entry.ip : undefined,
+      registeredIp: entry.ip,
+      registeredDomain: fqdn,
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -57,4 +82,3 @@ export async function POST(request: Request) {
     message: "Server authorized. The agent's existing token is now active.",
   }, { status: 201 });
 }
-

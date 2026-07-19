@@ -1,4 +1,4 @@
-import { verifyApiKeyFull, getSessionFromCookies, extractApiKey, extractClientIp, extractPublicUrl } from "@/lib/auth";
+import { verifyApiKeyFull, getSessionFromCookies, extractApiKey, extractClientIp, extractPublicUrl, extractRequestFqdn } from "@/lib/auth";
 import { addBan, isWhitelisted, publishEvent, pushAudit, pushFailedAuth } from "@/lib/redis";
 import { lookupIP } from "@/lib/geoip";
 import { checkIP, intelEnabled } from "@/lib/intel";
@@ -11,11 +11,12 @@ export async function POST(request: Request) {
   if (!server && !session) {
     // Only log to failed_auth for non-ip_mismatch cases:
     // ip_mismatch is already logged by recordIpMismatchRejection inside verifyApiKeyFull.
-    if (authReason !== "ip_mismatch") {
+    if (authReason !== "ip_mismatch" && authReason !== "fqdn_mismatch") {
       await pushFailedAuth({
         ip: extractClientIp(request),
         token: extractApiKey(request) ?? "<none>",
         url: extractPublicUrl(request),
+        fqdn: extractRequestFqdn(request),
         timestamp: new Date().toISOString(),
         reason: authReason ?? "token_mismatch",
       });

@@ -1,15 +1,16 @@
-import { verifyApiKeyFull, extractApiKey, extractClientIp, extractPublicUrl } from "@/lib/auth";
+import { verifyApiKeyFull, extractApiKey, extractClientIp, extractPublicUrl, extractRequestFqdn } from "@/lib/auth";
 import { getAllBans, getWhitelist, getTempWhitelist, pushFailedAuth } from "@/lib/redis";
 
 export async function GET(request: Request) {
   const { server, reason: authReason } = await verifyApiKeyFull(request);
   if (!server) {
     // ip_mismatch is already logged by recordIpMismatchRejection inside verifyApiKeyFull
-    if (authReason !== "ip_mismatch") {
+    if (authReason !== "ip_mismatch" && authReason !== "fqdn_mismatch") {
       await pushFailedAuth({
         ip: extractClientIp(request),
         token: extractApiKey(request) ?? "<none>",
         url: extractPublicUrl(request),
+        fqdn: extractRequestFqdn(request),
         timestamp: new Date().toISOString(),
         reason: authReason ?? "token_mismatch",
       });

@@ -53,12 +53,15 @@ export interface ServerRecord {
   name: string;
   owner_id: number;
   last_seen: string | null;
-  /** IP first seen for this server (set on first successful agent auth). */
+  /** Source IP the agent must authenticate from (required at registration). */
   registered_ip: string | null;
+  /** FQDN the agent must authenticate through (from ALLOWED_ORIGINS). */
+  registered_domain: string | null;
   /** Most recent IP used by this server's agent. */
   last_ip: string | null;
   created_at: string;
   ip_mismatch?: boolean;
+  fqdn_mismatch?: boolean;
   token_reused?: boolean;
 }
 
@@ -75,7 +78,7 @@ export function generateServerToken(): string {
 export async function createServer(
   name: string,
   ownerId: number,
-  opts?: { registeredIp?: string; token?: string }
+  opts: { registeredIp: string; registeredDomain: string }
 ): Promise<{ server: ServerRecord; token: string }> {
   const r = getRedis();
 
@@ -85,10 +88,10 @@ export async function createServer(
     throw new Error("UNIQUE constraint failed: server name already exists");
   }
 
-  const token = opts?.token ?? generateServerToken();
+  const token = generateServerToken();
   const token_hash = hashToken(token);
 
-  // Unique token check
+  // Unique token check (collision guard — astronomically unlikely)
   const existingIdByToken = await r.hget("servers:by_token_hash", token_hash);
   if (existingIdByToken) {
     throw new Error("UNIQUE constraint failed: token already exists");
@@ -96,14 +99,14 @@ export async function createServer(
 
   const id = await r.incr("servers:next_id");
   const timestamp = new Date().toISOString();
-  const registeredIp = opts?.registeredIp ?? null;
 
   const server: ServerRecord = {
     id,
     name,
     owner_id: ownerId,
     last_seen: null,
-    registered_ip: registeredIp,
+    registered_ip: opts.registeredIp,
+    registered_domain: opts.registeredDomain,
     last_ip: null,
     created_at: timestamp,
   };
@@ -114,7 +117,8 @@ export async function createServer(
     id: String(id),
     owner_id: String(ownerId),
     token_hash,
-    ...(registeredIp ? { registered_ip: registeredIp } : {}),
+    registered_ip: opts.registeredIp,
+    registered_domain: opts.registeredDomain,
   } as unknown as Record<string, string>);
   pipeline.hset("servers:by_name", name, String(id));
   pipeline.hset("servers:by_token_hash", token_hash, String(id));
@@ -127,7 +131,7 @@ export async function createServerWithToken(
   name: string,
   token: string,
   ownerId: number,
-  opts?: { registeredIp?: string }
+  opts: { registeredIp: string; registeredDomain: string }
 ): Promise<ServerRecord> {
   const r = getRedis();
 
@@ -147,14 +151,14 @@ export async function createServerWithToken(
 
   const id = await r.incr("servers:next_id");
   const timestamp = new Date().toISOString();
-  const registeredIp = opts?.registeredIp ?? null;
 
   const server: ServerRecord = {
     id,
     name,
     owner_id: ownerId,
     last_seen: null,
-    registered_ip: registeredIp,
+    registered_ip: opts.registeredIp,
+    registered_domain: opts.registeredDomain,
     last_ip: null,
     created_at: timestamp,
   };
@@ -165,7 +169,8 @@ export async function createServerWithToken(
     id: String(id),
     owner_id: String(ownerId),
     token_hash,
-    ...(registeredIp ? { registered_ip: registeredIp } : {}),
+    registered_ip: opts.registeredIp,
+    registered_domain: opts.registeredDomain,
   } as unknown as Record<string, string>);
   pipeline.hset("servers:by_name", name, String(id));
   pipeline.hset("servers:by_token_hash", token_hash, String(id));
@@ -192,9 +197,11 @@ export async function getServerById(id: number): Promise<ServerRecord | undefine
     owner_id: Number(data.owner_id),
     last_seen: data.last_seen || null,
     registered_ip: data.registered_ip || null,
+    registered_domain: data.registered_domain || null,
     last_ip: data.last_ip || null,
     created_at: data.created_at,
     ip_mismatch: data.ip_mismatch === "1",
+    fqdn_mismatch: data.fqdn_mismatch === "1",
     token_reused: data.token_reused === "1",
   };
 }
@@ -220,9 +227,11 @@ export async function getAllServers(): Promise<ServerRecord[]> {
         owner_id: Number(data.owner_id),
         last_seen: data.last_seen || null,
         registered_ip: data.registered_ip || null,
+        registered_domain: data.registered_domain || null,
         last_ip: data.last_ip || null,
         created_at: data.created_at,
         ip_mismatch: data.ip_mismatch === "1",
+        fqdn_mismatch: data.fqdn_mismatch === "1",
         token_reused: data.token_reused === "1",
       });
     }
@@ -282,57 +291,47 @@ export async function rotateServerToken(id: number): Promise<string | null> {
  * Updates last_seen, last_ip, registered_ip (on first contact), and
  * detects/clears ip_mismatch and token_reused flags.
  */
-export async function touchServer(id: number, ip?: string): Promise<void> {
+export async function touchServer(id: number, ip: string): Promise<void> {
   const r = getRedis();
   const server = await getServerById(id);
   if (!server) return;
 
   const timestamp = new Date().toISOString();
-  const updates: Record<string, string> = { last_seen: timestamp };
+  const updates: Record<string, string> = { last_seen: timestamp, last_ip: ip };
 
-  if (ip) {
-    let registeredIp = server.registered_ip;
-    if (!registeredIp) {
-      // First successful connection — lock in the IP
-      registeredIp = ip;
-      updates.registered_ip = ip;
-    }
+  // Track all source IPs this token has been used from
+  await r.sadd(`server:id:${id}:ips`, ip);
+  const uniqueIpsCount = await r.scard(`server:id:${id}:ips`);
 
-    updates.last_ip = ip;
+  if (uniqueIpsCount > 1) {
+    updates.token_reused = "1";
+    await pushAudit({
+      action: "token_reuse_detected",
+      ip,
+      server: server.name,
+      timestamp,
+      actor: "system",
+    });
+  }
 
-    // Track all source IPs this token has been used from
-    await r.sadd(`server:id:${id}:ips`, ip);
-    const uniqueIpsCount = await r.scard(`server:id:${id}:ips`);
-
-    if (uniqueIpsCount > 1) {
-      updates.token_reused = "1";
-      await pushAudit({
-        action: "token_reuse_detected",
-        ip,
-        server: server.name,
-        timestamp,
-        actor: "system",
-      });
-    }
-
-    if (ip !== registeredIp) {
-      updates.ip_mismatch = "1";
-      await pushAudit({
-        action: "server_ip_changed",
-        ip,
-        server: server.name,
-        timestamp,
-        actor: "system",
-      });
-    } else {
-      // IP matches — clear any previous mismatch flag
-      updates.ip_mismatch = "0";
-    }
+  if (server.registered_ip && ip !== server.registered_ip) {
+    updates.ip_mismatch = "1";
+    await pushAudit({
+      action: "server_ip_changed",
+      ip,
+      server: server.name,
+      timestamp,
+      actor: "system",
+    });
+  } else {
+    updates.ip_mismatch = "0";
   }
 
   await r.hset(`server:id:${id}`, updates);
 }
 
+/**
+ * Record a failed auth attempt where the token was recognised but the
 /**
  * Record a failed auth attempt where the token was recognised but the
  * source IP doesn't match the server's registered IP.
@@ -341,12 +340,12 @@ export async function touchServer(id: number, ip?: string): Promise<void> {
 export async function recordIpMismatchRejection(
   server: ServerRecord,
   ip: string,
+  fqdn: string,
   url: string,
   token: string
 ): Promise<void> {
   const timestamp = new Date().toISOString();
 
-  // Audit log the rejection
   await pushAudit({
     action: "auth_rejected_ip_mismatch",
     ip,
@@ -355,13 +354,45 @@ export async function recordIpMismatchRejection(
     actor: "system",
   });
 
-  // Push to failed_auth log with full context
   await pushFailedAuth({
     ip,
     token,
     url,
+    fqdn,
     timestamp,
     reason: "ip_mismatch",
+    server: server.name,
+  });
+}
+
+/**
+ * Record a failed auth attempt where the token was recognised but the
+ * request FQDN doesn't match the server's registered domain.
+ */
+export async function recordFqdnMismatchRejection(
+  server: ServerRecord,
+  ip: string,
+  fqdn: string,
+  url: string,
+  token: string
+): Promise<void> {
+  const timestamp = new Date().toISOString();
+
+  await pushAudit({
+    action: "auth_rejected_fqdn_mismatch",
+    ip,
+    server: server.name,
+    timestamp,
+    actor: "system",
+  });
+
+  await pushFailedAuth({
+    ip,
+    token,
+    url,
+    fqdn,
+    timestamp,
+    reason: "fqdn_mismatch",
     server: server.name,
   });
 }
@@ -523,15 +554,19 @@ export interface FailedAuthEntry {
   token: string;
   /** Full request URL including FQDN (e.g. https://f2b.example.com/api/ban) */
   url: string;
+  /** The FQDN (hostname only) the request arrived on — from x-forwarded-host */
+  fqdn?: string;
   timestamp: string;
   /**
    * Why authentication failed:
-   *  - "no_token"      — no x-api-key header was sent
-   *  - "token_mismatch" — token not found in the registry
-   *  - "ip_mismatch"   — token is valid but the source IP differs from the registered IP
+   *  - "no_token"         — no x-api-key header was sent
+   *  - "token_mismatch"   — token not found in the registry
+   *  - "ip_mismatch"      — token valid, source IP doesn't match registered IP
+   *  - "fqdn_mismatch"    — token valid, FQDN doesn't match server's registered domain
+   *  - "fqdn_not_allowed" — FQDN is not in the ALLOWED_ORIGINS list
    */
-  reason?: "no_token" | "token_mismatch" | "ip_mismatch";
-  /** Server name, only present for ip_mismatch (token was recognised) */
+  reason?: "no_token" | "token_mismatch" | "ip_mismatch" | "fqdn_mismatch" | "fqdn_not_allowed";
+  /** Server name, only present when token was recognised (ip_mismatch / fqdn_mismatch) */
   server?: string;
 }
 

@@ -55,14 +55,15 @@ export const changePasswordSchema = z.object({
 
 export const createServerSchema = z.object({
   name: z.string().min(1).max(64).regex(/^[a-zA-Z0-9._-]+$/, "Letters, numbers, _, ., - only"),
-  /** Optional: pre-set the registered IP (agent's expected source IP). */
+  /** Required: the agent's source IP — authentication will reject any other IP. */
   ip: z.string().regex(
     /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/,
     "Invalid IPv4 address"
-  ).optional(),
-  /** Optional: bring-your-own token instead of auto-generating one. */
-  token: z.string().min(8).max(256).optional(),
+  ),
+  /** Required: the FQDN this server will authenticate through (must be in ALLOWED_ORIGINS). */
+  domain: z.string().min(1).max(253),
 });
+
 
 // ── Invitations ──
 

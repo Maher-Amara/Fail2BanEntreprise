@@ -2,7 +2,7 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { timingSafeEqual } from "crypto";
 import { authenticateUser, type User } from "@/lib/db";
-import { getServerByToken, touchServer, recordIpMismatchRejection, type ServerRecord } from "@/lib/redis";
+import { getServerByToken, touchServer, recordIpMismatchRejection, recordFqdnMismatchRejection, type ServerRecord } from "@/lib/redis";
 
 const JWT_SECRET = () => new TextEncoder().encode(process.env.JWT_SECRET || "change-me-in-production");
 const COOKIE_NAME = "f2b_token";
@@ -16,7 +16,12 @@ function safeEqual(a: string, b: string): boolean {
 
 // ── API Key Auth (per-server token stored in Redis) ──
 
-export type AuthFailReason = "no_token" | "token_mismatch" | "ip_mismatch";
+export type AuthFailReason =
+  | "no_token"
+  | "token_mismatch"
+  | "ip_mismatch"
+  | "fqdn_mismatch"
+  | "fqdn_not_allowed";
 
 export interface ApiKeyResult {
   server: ServerRecord | null;
@@ -43,18 +48,34 @@ export async function verifyApiKeyFull(request: Request): Promise<ApiKeyResult> 
   const key = request.headers.get("x-api-key");
   if (!key) return { server: null, reason: "no_token" };
 
+  const requestFqdn = extractRequestFqdn(request);
+
+  // Step 1: Reject immediately if the FQDN is not in the allowlist
+  const allowedOrigins = getAllowedOrigins();
+  if (allowedOrigins.length > 0 && !allowedOrigins.includes(requestFqdn)) {
+    return { server: null, reason: "fqdn_not_allowed" };
+  }
+
+  // Step 2: Resolve token → server record
   const server = await getServerByToken(key);
   if (!server) return { server: null, reason: "token_mismatch" };
 
   const clientIp = extractClientIp(request);
+  const publicUrl = extractPublicUrl(request);
 
+  // Step 3: FQDN must match the server's registered domain
+  if (server.registered_domain && server.registered_domain !== requestFqdn) {
+    await recordFqdnMismatchRejection(server, clientIp, requestFqdn, publicUrl, key);
+    return { server: null, reason: "fqdn_mismatch" };
+  }
+
+  // Step 4: IP must match the registered IP
   if (server.registered_ip && server.registered_ip !== clientIp) {
-    // Token is valid but IP does not match — log the rejection, do NOT update last_seen
-    await recordIpMismatchRejection(server, clientIp, extractPublicUrl(request), key);
+    await recordIpMismatchRejection(server, clientIp, requestFqdn, publicUrl, key);
     return { server: null, reason: "ip_mismatch" };
   }
 
-  // Successful auth — update last_seen, last_ip, registered_ip on first contact
+  // All checks passed — update last_seen, last_ip
   await touchServer(server.id, clientIp);
   return { server, reason: null };
 }
@@ -72,6 +93,31 @@ export function extractClientIp(request: Request): string {
     request.headers.get("x-real-ip") ||
     "unknown"
   );
+}
+
+/**
+ * Extract the public-facing hostname (no port, no scheme) from Cloudflare
+ * Tunnel headers. Falls back to the Host header, then to the internal hostname.
+ */
+export function extractRequestFqdn(request: Request): string {
+  const host =
+    request.headers.get("x-forwarded-host") ||
+    request.headers.get("host") ||
+    "";
+  // Strip any port suffix (e.g. "example.com:3000" → "example.com")
+  return host.split(":")[0] ?? host;
+}
+
+/**
+ * Return the list of allowed FQDNs from the ALLOWED_ORIGINS environment variable.
+ * Returns an empty array when the env var is not set (allows all — dev-only).
+ */
+export function getAllowedOrigins(): string[] {
+  const raw = process.env.ALLOWED_ORIGINS ?? "";
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /**

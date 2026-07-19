@@ -1,5 +1,5 @@
-import { getSessionFromCookies } from "@/lib/auth";
-import { createServer, createServerWithToken, getAllServers, deleteServer } from "@/lib/redis";
+import { getSessionFromCookies, getAllowedOrigins } from "@/lib/auth";
+import { createServer, getAllServers, deleteServer } from "@/lib/redis";
 import { createServerSchema, parseBody } from "@/lib/validation";
 
 export async function GET() {
@@ -20,26 +20,29 @@ export async function POST(request: Request) {
   const parsed = parseBody(createServerSchema, body);
   if (!parsed.success) return Response.json({ error: parsed.error }, { status: 400 });
 
-  const { name, ip, token: providedToken } = parsed.data;
+  const { name, ip, domain } = parsed.data;
+
+  // Validate domain is in the allowed origins list
+  const allowedOrigins = getAllowedOrigins();
+  if (allowedOrigins.length > 0 && !allowedOrigins.includes(domain)) {
+    return Response.json(
+      { error: `Domain "${domain}" is not in the allowed origins list` },
+      { status: 400 }
+    );
+  }
 
   let server, token;
   try {
-    if (providedToken) {
-      // Bring-your-own token path
-      server = await createServerWithToken(name, providedToken, session.uid, {
-        registeredIp: ip,
-      });
-      token = providedToken;
-    } else {
-      // Auto-generate a token
-      const res = await createServer(name, session.uid, { registeredIp: ip });
-      server = res.server;
-      token = res.token;
-    }
+    const res = await createServer(name, session.uid, {
+      registeredIp: ip,
+      registeredDomain: domain,
+    });
+    server = res.server;
+    token = res.token;
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     if (msg.includes("UNIQUE constraint failed")) {
-      return Response.json({ error: "A server with that name or token already exists" }, { status: 409 });
+      return Response.json({ error: "A server with that name already exists" }, { status: 409 });
     }
     throw err;
   }
