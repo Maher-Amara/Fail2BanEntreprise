@@ -139,7 +139,7 @@ export default function ServersPage() {
     <div className="flex flex-col flex-1">
       <NavHeader username={me?.username} ip={me?.ip} location={location} />
 
-      <main className="max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
+      <main className="max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 space-y-8">
         <div>
           <h1 className="text-2xl font-bold">Servers</h1>
           <p className="text-muted text-sm mt-1">Each registered server gets a unique API token used by its Fail2Ban agent.</p>
@@ -182,42 +182,35 @@ export default function ServersPage() {
         {/* Add server */}
         <div className="bg-card border border-card-border rounded-xl p-4 space-y-3">
           <h2 className="text-sm font-semibold text-muted">Register New Server</h2>
-          <div className="flex gap-2">
+          {/* Single-row layout on wide screens: Name · IP · Token · Button */}
+          <div className="flex flex-col lg:flex-row gap-2">
             <input
               type="text"
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleCreate()}
               placeholder="Name — e.g. dialer1.callpro.be"
-              className="flex-1 px-3 py-2 bg-background border border-card-border rounded-lg text-sm focus:outline-none focus:border-accent"
+              className="flex-1 min-w-0 px-3 py-2 bg-background border border-card-border rounded-lg text-sm focus:outline-none focus:border-accent"
             />
-            <button onClick={handleCreate} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">
+            <input
+              type="text"
+              value={newIp}
+              onChange={e => setNewIp(e.target.value)}
+              placeholder="Registered IP (optional)"
+              title="Lock this server to a specific source IP. Leave blank to auto-detect on first connection."
+              className="w-full lg:w-44 px-3 py-2 bg-background border border-card-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent"
+            />
+            <input
+              type="text"
+              value={newTokenInput}
+              onChange={e => setNewTokenInput(e.target.value)}
+              placeholder="Token (optional — auto-generated if blank)"
+              title="Bring your own token, or leave blank to auto-generate one."
+              className="w-full lg:w-72 px-3 py-2 bg-background border border-card-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent"
+            />
+            <button onClick={handleCreate} className="px-5 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0">
               Register
             </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <label className="text-xs text-muted">Registered IP <span className="opacity-60">(optional)</span></label>
-              <input
-                type="text"
-                value={newIp}
-                onChange={e => setNewIp(e.target.value)}
-                placeholder="e.g. 192.168.1.10"
-                className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent"
-              />
-              <p className="text-[10px] text-muted">Lock the server to this source IP. Leave blank to auto-detect on first connection.</p>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted">Token <span className="opacity-60">(optional)</span></label>
-              <input
-                type="text"
-                value={newTokenInput}
-                onChange={e => setNewTokenInput(e.target.value)}
-                placeholder="Paste existing token or leave blank to generate"
-                className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent"
-              />
-              <p className="text-[10px] text-muted">Bring your own token, or leave blank to auto-generate one.</p>
-            </div>
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
         </div>
@@ -232,63 +225,57 @@ export default function ServersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-card-border text-muted text-xs uppercase tracking-wider">
-                  <th className="text-left px-4 py-3">Name</th>
-                  <th className="text-left px-4 py-3 hidden sm:table-cell">IP Address</th>
-                  <th className="text-left px-4 py-3 hidden sm:table-cell">Last Seen</th>
-                  <th className="text-left px-4 py-3 hidden sm:table-cell">Status</th>
+                  <th className="text-left px-4 py-3 w-56">Name</th>
+                  <th className="text-left px-4 py-3 hidden md:table-cell w-36">Registered IP</th>
+                  <th className="text-left px-4 py-3 hidden sm:table-cell">Last Seen · Login IP</th>
+                  <th className="text-left px-4 py-3 hidden lg:table-cell w-28">Status</th>
                   <th className="text-right px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {servers.map(s => (
                   <tr key={s.id} className="border-b border-card-border/50 hover:bg-card-border/10">
-                    <td className="px-4 py-3 font-mono font-medium">{s.name}</td>
-                    <td className="px-4 py-3 font-mono text-xs hidden sm:table-cell">
-                      {s.last_ip ? (
-                        <div className="flex flex-col">
-                          <span>{s.last_ip}</span>
-                          {s.registered_ip && s.registered_ip !== s.last_ip && (
-                            <span className="text-[10px] text-muted">Reg: {s.registered_ip}</span>
-                          )}
-                        </div>
-                      ) : (
-                        <span className="text-muted">Never connected</span>
-                      )}
+                    {/* Name — never wrap so long hostnames stay on one line */}
+                    <td className="px-4 py-3 font-mono font-medium whitespace-nowrap">{s.name}</td>
+                    {/* Registered IP — the locked-in expected source IP */}
+                    <td className="px-4 py-3 font-mono text-xs hidden md:table-cell text-muted">
+                      {s.registered_ip ?? <span className="opacity-40 italic">auto</span>}
                     </td>
-                    <td className="px-4 py-3 text-muted text-xs hidden sm:table-cell">
+                    {/* Last Seen + last login IP stacked */}
+                    <td className="px-4 py-3 text-xs hidden sm:table-cell">
                       {s.last_seen ? (
                         <div className="flex flex-col gap-0.5">
-                          <span>{new Date(s.last_seen).toLocaleString()}</span>
+                          <span className="text-foreground">{new Date(s.last_seen).toLocaleString()}</span>
                           {s.last_ip && (
-                            <span className="font-mono text-[10px] opacity-70">from {s.last_ip}</span>
+                            <span className="font-mono text-[10px] text-muted">from {s.last_ip}</span>
                           )}
                         </div>
-                      ) : "Never"}
+                      ) : <span className="text-muted">Never</span>}
                     </td>
-                    <td className="px-4 py-3 hidden sm:table-cell">
-                      <div className="flex flex-wrap gap-1">
-                        {s.token_reused ? (
-                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-danger/10 text-danger border border-danger/20 rounded-full" title="Token has been used by multiple distinct IP addresses">
-                            ⚠️ Token Reused
-                          </span>
-                        ) : s.ip_mismatch ? (
-                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-warning/10 text-warning border border-warning/20 rounded-full" title={`IP changed from registered ${s.registered_ip}`}>
-                            ⚠️ IP Mismatch
-                          </span>
-                        ) : s.last_seen ? (
-                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-success/10 text-success border border-success/20 rounded-full">
-                            ✓ Active
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-card-border/30 text-muted border border-card-border rounded-full">
-                            Pending
-                          </span>
-                        )}
-                      </div>
+                    {/* Status badge */}
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      {s.token_reused ? (
+                        <span className="px-2 py-0.5 text-[10px] font-semibold bg-danger/10 text-danger border border-danger/20 rounded-full" title="Token has been used by multiple distinct IP addresses">
+                          ⚠️ Token Reused
+                        </span>
+                      ) : s.ip_mismatch ? (
+                        <span className="px-2 py-0.5 text-[10px] font-semibold bg-warning/10 text-warning border border-warning/20 rounded-full" title={`IP changed from registered ${s.registered_ip}`}>
+                          ⚠️ IP Mismatch
+                        </span>
+                      ) : s.last_seen ? (
+                        <span className="px-2 py-0.5 text-[10px] font-semibold bg-success/10 text-success border border-success/20 rounded-full">
+                          ✓ Active
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 text-[10px] font-semibold bg-card-border/30 text-muted border border-card-border rounded-full">
+                          Pending
+                        </span>
+                      )}
                     </td>
+                    {/* Actions */}
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => handleRotate(s.id)} className="px-3 py-1 text-xs bg-warning/10 text-warning hover:bg-warning/20 rounded-md transition-colors font-medium">
+                        <button onClick={() => handleRotate(s.id)} className="px-3 py-1 text-xs bg-warning/10 text-warning hover:bg-warning/20 rounded-md transition-colors font-medium whitespace-nowrap">
                           Rotate Token
                         </button>
                         <button onClick={() => handleDelete(s.id, s.name)} className="px-3 py-1 text-xs bg-danger/10 text-danger hover:bg-danger/20 rounded-md transition-colors">
@@ -343,7 +330,7 @@ export default function ServersPage() {
                           )}
                         </div>
                         {/* Full FQDN URL */}
-                        <p className="text-xs text-muted font-mono truncate max-w-lg" title={entry.url}>
+                        <p className="text-xs text-muted font-mono truncate" title={entry.url}>
                           {entry.url}
                         </p>
                         {/* Full token */}
