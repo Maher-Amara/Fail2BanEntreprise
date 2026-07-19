@@ -1,7 +1,8 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { timingSafeEqual } from "crypto";
-import { authenticateUser, getServerByToken, touchServer, type User, type ServerRecord } from "@/lib/db";
+import { authenticateUser, type User } from "@/lib/db";
+import { getServerByToken, touchServer, recordIpMismatchRejection, type ServerRecord } from "@/lib/redis";
 
 const JWT_SECRET = () => new TextEncoder().encode(process.env.JWT_SECRET || "change-me-in-production");
 const COOKIE_NAME = "f2b_token";
@@ -13,20 +14,49 @@ function safeEqual(a: string, b: string): boolean {
   try { return timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; }
 }
 
-// ── API Key Auth (per-server token stored in SQLite) ──
+// ── API Key Auth (per-server token stored in Redis) ──
 
+export type AuthFailReason = "no_token" | "token_mismatch" | "ip_mismatch";
+
+export interface ApiKeyResult {
+  server: ServerRecord | null;
+  /** Populated when server is null, indicating why auth failed. */
+  reason: AuthFailReason | null;
+}
+
+/**
+ * Verify the x-api-key header against registered servers.
+ * Returns the matching ServerRecord on success, or null on failure.
+ * Side-effects on success only: updates last_seen / last_ip on the server record.
+ * IP-mismatch rejections are logged to audit + failed_auth automatically.
+ */
 export async function verifyApiKey(request: Request): Promise<ServerRecord | null> {
-  const key = request.headers.get("x-api-key");
-  if (!key) return null;
-
-  // Constant-time: compare candidate key with nothing when empty,
-  // but guard against timing attacks on length by hashing both sides
-  const server = getServerByToken(key);
-  if (!server) return null;
-
-  // Touch last_seen asynchronously (fire-and-forget, no await)
-  touchServer(server.id);
+  const { server } = await verifyApiKeyFull(request);
   return server;
+}
+
+/**
+ * Like verifyApiKey but also returns the failure reason so the caller can
+ * include it in its own pushFailedAuth entry.
+ */
+export async function verifyApiKeyFull(request: Request): Promise<ApiKeyResult> {
+  const key = request.headers.get("x-api-key");
+  if (!key) return { server: null, reason: "no_token" };
+
+  const server = await getServerByToken(key);
+  if (!server) return { server: null, reason: "token_mismatch" };
+
+  const clientIp = extractClientIp(request);
+
+  if (server.registered_ip && server.registered_ip !== clientIp) {
+    // Token is valid but IP does not match — log the rejection, do NOT update last_seen
+    await recordIpMismatchRejection(server, clientIp, request.url, key);
+    return { server: null, reason: "ip_mismatch" };
+  }
+
+  // Successful auth — update last_seen, last_ip, registered_ip on first contact
+  await touchServer(server.id, clientIp);
+  return { server, reason: null };
 }
 
 /** Read the raw x-api-key header without doing any DB lookup — used for logging. */

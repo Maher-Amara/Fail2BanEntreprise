@@ -1,6 +1,5 @@
 import { getSessionFromCookies } from "@/lib/auth";
-import { getFailedAuths, deleteFailedAuth } from "@/lib/redis";
-import { createServerWithToken } from "@/lib/db";
+import { getFailedAuths, deleteFailedAuth, createServerWithToken } from "@/lib/redis";
 
 export async function POST(request: Request) {
   const session = await getSessionFromCookies();
@@ -33,10 +32,11 @@ export async function POST(request: Request) {
 
   let server;
   try {
-    server = createServerWithToken(name.trim(), entry.token, session.uid);
+    server = await createServerWithToken(name.trim(), entry.token, session.uid, {
+      registeredIp: entry.ip !== "unknown" ? entry.ip : undefined,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
-    // SQLite UNIQUE constraint on name or token_hash
     if (msg.includes("UNIQUE constraint failed")) {
       return Response.json(
         { error: "A server with that name or token already exists" },
@@ -57,3 +57,4 @@ export async function POST(request: Request) {
     message: "Server authorized. The agent's existing token is now active.",
   }, { status: 201 });
 }
+

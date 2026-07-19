@@ -8,7 +8,11 @@ interface ServerRecord {
   name: string;
   owner_id: number;
   last_seen: string | null;
+  registered_ip: string | null;
+  last_ip: string | null;
   created_at: string;
+  ip_mismatch?: boolean;
+  token_reused?: boolean;
 }
 
 interface FailedAuthEntry {
@@ -16,6 +20,8 @@ interface FailedAuthEntry {
   token: string;
   url: string;
   timestamp: string;
+  reason?: "no_token" | "token_mismatch" | "ip_mismatch";
+  server?: string;
 }
 
 interface MeData { username: string; ip: string; city?: string; country?: string; }
@@ -25,7 +31,9 @@ export default function ServersPage() {
   const [failedAuths, setFailedAuths] = useState<FailedAuthEntry[]>([]);
   const [me, setMe] = useState<MeData | null>(null);
   const [newName, setNewName] = useState("");
+  const [newIp, setNewIp] = useState("");
   const [newToken, setNewToken] = useState<{ name: string; token: string } | null>(null);
+  const [newTokenInput, setNewTokenInput] = useState("");
   const [rotatedToken, setRotatedToken] = useState<{ id: number; token: string } | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -53,15 +61,20 @@ export default function ServersPage() {
   async function handleCreate() {
     if (!newName.trim()) return;
     setError("");
+    const body: Record<string, string> = { name: newName.trim() };
+    if (newIp.trim()) body.ip = newIp.trim();
+    if (newTokenInput.trim()) body.token = newTokenInput.trim();
     const res = await fetch("/api/servers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newName.trim() }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     if (!res.ok) { setError(data.error); return; }
     setNewToken({ name: data.server.name, token: data.token });
     setNewName("");
+    setNewIp("");
+    setNewTokenInput("");
     fetchServers();
   }
 
@@ -175,12 +188,36 @@ export default function ServersPage() {
               value={newName}
               onChange={e => setNewName(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleCreate()}
-              placeholder="e.g. dialer1.callpro.be"
+              placeholder="Name — e.g. dialer1.callpro.be"
               className="flex-1 px-3 py-2 bg-background border border-card-border rounded-lg text-sm focus:outline-none focus:border-accent"
             />
             <button onClick={handleCreate} className="px-4 py-2 bg-accent hover:bg-accent-hover text-white text-sm font-medium rounded-lg transition-colors">
               Register
             </button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-xs text-muted">Registered IP <span className="opacity-60">(optional)</span></label>
+              <input
+                type="text"
+                value={newIp}
+                onChange={e => setNewIp(e.target.value)}
+                placeholder="e.g. 192.168.1.10"
+                className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent"
+              />
+              <p className="text-[10px] text-muted">Lock the server to this source IP. Leave blank to auto-detect on first connection.</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted">Token <span className="opacity-60">(optional)</span></label>
+              <input
+                type="text"
+                value={newTokenInput}
+                onChange={e => setNewTokenInput(e.target.value)}
+                placeholder="Paste existing token or leave blank to generate"
+                className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm font-mono focus:outline-none focus:border-accent"
+              />
+              <p className="text-[10px] text-muted">Bring your own token, or leave blank to auto-generate one.</p>
+            </div>
           </div>
           {error && <p className="text-danger text-sm">{error}</p>}
         </div>
@@ -196,8 +233,9 @@ export default function ServersPage() {
               <thead>
                 <tr className="border-b border-card-border text-muted text-xs uppercase tracking-wider">
                   <th className="text-left px-4 py-3">Name</th>
+                  <th className="text-left px-4 py-3 hidden sm:table-cell">IP Address</th>
                   <th className="text-left px-4 py-3 hidden sm:table-cell">Last Seen</th>
-                  <th className="text-left px-4 py-3 hidden sm:table-cell">Created</th>
+                  <th className="text-left px-4 py-3 hidden sm:table-cell">Status</th>
                   <th className="text-right px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -205,15 +243,52 @@ export default function ServersPage() {
                 {servers.map(s => (
                   <tr key={s.id} className="border-b border-card-border/50 hover:bg-card-border/10">
                     <td className="px-4 py-3 font-mono font-medium">{s.name}</td>
-                    <td className="px-4 py-3 text-muted text-xs hidden sm:table-cell">
-                      {s.last_seen ? new Date(s.last_seen).toLocaleString() : "Never"}
+                    <td className="px-4 py-3 font-mono text-xs hidden sm:table-cell">
+                      {s.last_ip ? (
+                        <div className="flex flex-col">
+                          <span>{s.last_ip}</span>
+                          {s.registered_ip && s.registered_ip !== s.last_ip && (
+                            <span className="text-[10px] text-muted">Reg: {s.registered_ip}</span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-muted">Never connected</span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-muted text-xs hidden sm:table-cell">
-                      {new Date(s.created_at).toLocaleDateString()}
+                      {s.last_seen ? (
+                        <div className="flex flex-col gap-0.5">
+                          <span>{new Date(s.last_seen).toLocaleString()}</span>
+                          {s.last_ip && (
+                            <span className="font-mono text-[10px] opacity-70">from {s.last_ip}</span>
+                          )}
+                        </div>
+                      ) : "Never"}
+                    </td>
+                    <td className="px-4 py-3 hidden sm:table-cell">
+                      <div className="flex flex-wrap gap-1">
+                        {s.token_reused ? (
+                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-danger/10 text-danger border border-danger/20 rounded-full" title="Token has been used by multiple distinct IP addresses">
+                            ⚠️ Token Reused
+                          </span>
+                        ) : s.ip_mismatch ? (
+                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-warning/10 text-warning border border-warning/20 rounded-full" title={`IP changed from registered ${s.registered_ip}`}>
+                            ⚠️ IP Mismatch
+                          </span>
+                        ) : s.last_seen ? (
+                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-success/10 text-success border border-success/20 rounded-full">
+                            ✓ Active
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 text-[10px] font-semibold bg-card-border/30 text-muted border border-card-border rounded-full">
+                            Pending
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button onClick={() => handleRotate(s.id)} className="px-3 py-1 text-xs bg-warning/10 text-warning hover:bg-warning/20 rounded-md transition-colors">
+                        <button onClick={() => handleRotate(s.id)} className="px-3 py-1 text-xs bg-warning/10 text-warning hover:bg-warning/20 rounded-md transition-colors font-medium">
                           Rotate Token
                         </button>
                         <button onClick={() => handleDelete(s.id, s.name)} className="px-3 py-1 text-xs bg-danger/10 text-danger hover:bg-danger/20 rounded-md transition-colors">
@@ -250,6 +325,22 @@ export default function ServersPage() {
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
                           <span className="font-semibold text-foreground font-mono">{entry.ip}</span>
                           <span title={new Date(entry.timestamp).toLocaleString()}>{relativeTime(entry.timestamp)}</span>
+                          {/* Reason badge */}
+                          {entry.reason === "ip_mismatch" && (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold bg-warning/10 text-warning border border-warning/20 rounded-full">
+                              ⚠ IP Mismatch{entry.server ? ` — ${entry.server}` : ""}
+                            </span>
+                          )}
+                          {entry.reason === "token_mismatch" && (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold bg-danger/10 text-danger border border-danger/20 rounded-full">
+                              ✕ Unknown Token
+                            </span>
+                          )}
+                          {entry.reason === "no_token" && (
+                            <span className="px-2 py-0.5 text-[10px] font-semibold bg-card-border/40 text-muted border border-card-border rounded-full">
+                              — No Token
+                            </span>
+                          )}
                         </div>
                         {/* Full FQDN URL */}
                         <p className="text-xs text-muted font-mono truncate max-w-lg" title={entry.url}>

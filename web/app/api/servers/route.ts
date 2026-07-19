@@ -1,12 +1,12 @@
 import { getSessionFromCookies } from "@/lib/auth";
-import { createServer, getAllServers, deleteServer } from "@/lib/db";
+import { createServer, createServerWithToken, getAllServers, deleteServer } from "@/lib/redis";
 import { createServerSchema, parseBody } from "@/lib/validation";
 
 export async function GET() {
   const session = await getSessionFromCookies();
   if (!session) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
-  const servers = getAllServers();
+  const servers = await getAllServers();
   return Response.json({ servers });
 }
 
@@ -20,7 +20,29 @@ export async function POST(request: Request) {
   const parsed = parseBody(createServerSchema, body);
   if (!parsed.success) return Response.json({ error: parsed.error }, { status: 400 });
 
-  const { server, token } = createServer(parsed.data.name, session.uid);
+  const { name, ip, token: providedToken } = parsed.data;
+
+  let server, token;
+  try {
+    if (providedToken) {
+      // Bring-your-own token path
+      server = await createServerWithToken(name, providedToken, session.uid, {
+        registeredIp: ip,
+      });
+      token = providedToken;
+    } else {
+      // Auto-generate a token
+      const res = await createServer(name, session.uid, { registeredIp: ip });
+      server = res.server;
+      token = res.token;
+    }
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("UNIQUE constraint failed")) {
+      return Response.json({ error: "A server with that name or token already exists" }, { status: 409 });
+    }
+    throw err;
+  }
 
   return Response.json({
     server,
@@ -36,6 +58,6 @@ export async function DELETE(request: Request) {
   const { id } = await request.json() as { id?: number };
   if (!id) return Response.json({ error: "Missing id" }, { status: 400 });
 
-  const ok = deleteServer(id);
+  const ok = await deleteServer(id);
   return Response.json({ status: ok ? "deleted" : "not_found" });
 }

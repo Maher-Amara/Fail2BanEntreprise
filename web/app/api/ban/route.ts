@@ -1,4 +1,4 @@
-import { verifyApiKey, getSessionFromCookies, extractApiKey, extractClientIp } from "@/lib/auth";
+import { verifyApiKeyFull, getSessionFromCookies, extractApiKey, extractClientIp } from "@/lib/auth";
 import { addBan, isWhitelisted, publishEvent, pushAudit, pushFailedAuth } from "@/lib/redis";
 import { lookupIP } from "@/lib/geoip";
 import { checkIP, intelEnabled } from "@/lib/intel";
@@ -6,16 +6,20 @@ import { banSchema, parseBody } from "@/lib/validation";
 
 export async function POST(request: Request) {
   // Accept either a per-server API key (agent) OR a JWT cookie (dashboard manual ban)
-  const server = await verifyApiKey(request);
+  const { server, reason: authReason } = await verifyApiKeyFull(request);
   const session = server ? null : await getSessionFromCookies();
   if (!server && !session) {
-    // Log the failed attempt before rejecting
-    await pushFailedAuth({
-      ip: extractClientIp(request),
-      token: extractApiKey(request) ?? "<none>",
-      url: request.url,
-      timestamp: new Date().toISOString(),
-    });
+    // Only log to failed_auth for non-ip_mismatch cases:
+    // ip_mismatch is already logged by recordIpMismatchRejection inside verifyApiKeyFull.
+    if (authReason !== "ip_mismatch") {
+      await pushFailedAuth({
+        ip: extractClientIp(request),
+        token: extractApiKey(request) ?? "<none>",
+        url: request.url,
+        timestamp: new Date().toISOString(),
+        reason: authReason ?? "token_mismatch",
+      });
+    }
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 

@@ -29,15 +29,6 @@ function migrate(database: Database.Database): void {
       updated_at TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
-    CREATE TABLE IF NOT EXISTS servers (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      name       TEXT    NOT NULL UNIQUE,
-      token_hash TEXT    NOT NULL UNIQUE,
-      owner_id   INTEGER NOT NULL REFERENCES users(id),
-      last_seen  TEXT,
-      created_at TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-
     CREATE TABLE IF NOT EXISTS invitations (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       token      TEXT    NOT NULL UNIQUE,
@@ -52,14 +43,6 @@ function migrate(database: Database.Database): void {
 // ── Helpers ──
 
 const SALT_ROUNDS = 12;
-
-export function hashToken(token: string): string {
-  return createHash("sha256").update(token).digest("hex");
-}
-
-export function generateServerToken(): string {
-  return `f2b_${randomBytes(24).toString("hex")}`;
-}
 
 export function generateInviteToken(): string {
   return randomBytes(32).toString("base64url");
@@ -133,90 +116,7 @@ export function needsSetup(): boolean {
   return getUserCount() === 0;
 }
 
-// ══════════════════════════════════════
-// SERVERS
-// ══════════════════════════════════════
 
-export interface ServerRecord {
-  id: number;
-  name: string;
-  owner_id: number;
-  last_seen: string | null;
-  created_at: string;
-}
-
-/** Creates a server and returns the plain-text token (only time it's visible). */
-export function createServer(name: string, ownerId: number): { server: ServerRecord; token: string } {
-  const token = generateServerToken();
-  const token_hash = hashToken(token);
-  const result = getDB().prepare(
-    "INSERT INTO servers (name, token_hash, owner_id) VALUES (?, ?, ?)"
-  ).run(name, token_hash, ownerId);
-  const server: ServerRecord = {
-    id: result.lastInsertRowid as number,
-    name,
-    owner_id: ownerId,
-    last_seen: null,
-    created_at: new Date().toISOString(),
-  };
-  return { server, token };
-}
-
-/**
- * Creates a server using a caller-supplied plain-text token.
- * Used when authorizing a server from a failed-auth entry so the
- * agent's existing token immediately starts working without reconfiguration.
- */
-export function createServerWithToken(name: string, token: string, ownerId: number): ServerRecord {
-  const token_hash = hashToken(token);
-  const result = getDB().prepare(
-    "INSERT INTO servers (name, token_hash, owner_id) VALUES (?, ?, ?)"
-  ).run(name, token_hash, ownerId);
-  return {
-    id: result.lastInsertRowid as number,
-    name,
-    owner_id: ownerId,
-    last_seen: null,
-    created_at: new Date().toISOString(),
-  };
-}
-
-export function getServerByToken(token: string): ServerRecord | undefined {
-  const h = hashToken(token);
-  return getDB().prepare(
-    "SELECT id, name, owner_id, last_seen, created_at FROM servers WHERE token_hash = ?"
-  ).get(h) as ServerRecord | undefined;
-}
-
-export function getServerById(id: number): ServerRecord | undefined {
-  return getDB().prepare(
-    "SELECT id, name, owner_id, last_seen, created_at FROM servers WHERE id = ?"
-  ).get(id) as ServerRecord | undefined;
-}
-
-export function getAllServers(): ServerRecord[] {
-  return getDB().prepare(
-    "SELECT id, name, owner_id, last_seen, created_at FROM servers ORDER BY id"
-  ).all() as ServerRecord[];
-}
-
-export function deleteServer(id: number): boolean {
-  return getDB().prepare("DELETE FROM servers WHERE id = ?").run(id).changes > 0;
-}
-
-/** Rotates the token for a server — returns the new plain-text token. */
-export function rotateServerToken(id: number): string | null {
-  const token = generateServerToken();
-  const token_hash = hashToken(token);
-  const result = getDB().prepare(
-    "UPDATE servers SET token_hash = ? WHERE id = ?"
-  ).run(token_hash, id);
-  return result.changes > 0 ? token : null;
-}
-
-export function touchServer(id: number): void {
-  getDB().prepare("UPDATE servers SET last_seen = datetime('now') WHERE id = ?").run(id);
-}
 
 // ══════════════════════════════════════
 // INVITATIONS
