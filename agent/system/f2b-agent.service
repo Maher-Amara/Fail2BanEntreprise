@@ -14,7 +14,6 @@ RestartSec=15
 # This prevents log duplication into /var/log/syslog and /var/log/daemon.log.
 StandardOutput=null
 StandardError=journal
-LogLevelMax=warning
 
 # Harden the service
 NoNewPrivileges=yes
