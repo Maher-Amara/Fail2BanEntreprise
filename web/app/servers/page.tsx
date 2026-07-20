@@ -322,7 +322,7 @@ export default function ServersPage() {
                   <th className="text-left px-4 py-3 w-48">Name</th>
                   <th className="text-left px-4 py-3 hidden md:table-cell w-36">Registered IP</th>
                   <th className="text-left px-4 py-3 hidden lg:table-cell">Domain</th>
-                  <th className="text-left px-4 py-3 hidden sm:table-cell">Last Seen · Login IP</th>
+                  <th className="text-left px-4 py-3 hidden sm:table-cell">Last Seen</th>
                   <th className="text-left px-4 py-3 hidden xl:table-cell w-28">Status</th>
                   <th className="text-right px-4 py-3">Actions</th>
                 </tr>
@@ -343,12 +343,7 @@ export default function ServersPage() {
                     {/* Last Seen + last login IP stacked */}
                     <td className="px-4 py-3 text-xs hidden sm:table-cell">
                       {s.last_seen ? (
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-foreground">{new Date(s.last_seen).toLocaleString()}</span>
-                          {s.last_ip && (
-                            <span className="font-mono text-[10px] text-muted">from {s.last_ip}</span>
-                          )}
-                        </div>
+                        <span className="text-foreground">{new Date(s.last_seen).toLocaleString()}</span>
                       ) : <span className="text-muted">Never</span>}
                     </td>
                     {/* Status badge */}
